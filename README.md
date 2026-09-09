@@ -35,10 +35,11 @@ Hover over any item and open a full crafting tree (AE2-style): it shows what you
 |-----|--------------|
 | JEI | Machine-agnostic recipe search, R/U keybinds, recipe/usage windows |
 | REI | Same hooks via reflection (works without JEI) |
-| Refined Storage 2 | Grid stock counts, ingredient extraction/crafting grid automation |
-| Applied Energistics 2 | ME terminal stock counts + "autocraftable" badge |
+| Refined Storage 2 | Grid stock counts, ingredient extraction/crafting grid automation (compiled against RS 2.0.9, tested with 2.0.9) |
+| Applied Energistics 2 | ME terminal stock counts + "autocraftable" badge (reflection) |
 
 No hard dependency: the mod runs fine with JEI/REI/RS/AE2 absent (fallback to the vanilla `RecipeManager`).
+JEI and Refined Storage are **compile-time** integrations (typed API calls guarded at runtime by mod-presence checks); AE2/REI still use reflection. One known internal detail: Refined Storage's grid menu keeps its `Grid` field private with no public accessor, so that single field is read reflectively (typed + guarded).
 
 ## Building
 
@@ -54,6 +55,12 @@ JEI is compiled against the official **API artifacts** published on [maven.blame
 
 ```properties
 jei_version=19.52.0.422
+```
+
+Refined Storage is pinned the same way (full mod jar from [maven.creeperhost.net](https://maven.creeperhost.net/), the same repository Refined Storage's own addon projects use):
+
+```properties
+refinedstorage_version=2.0.9
 ```
 
 To test inside the dev client with JEI installed, the `localRuntime` dependency fetches the full JEI jar automatically (`./gradlew runClient`).

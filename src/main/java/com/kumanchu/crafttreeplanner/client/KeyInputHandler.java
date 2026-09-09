@@ -3,6 +3,7 @@ package com.kumanchu.crafttreeplanner.client;
 import com.kumanchu.crafttreeplanner.CraftTreePlanner;
 import com.kumanchu.crafttreeplanner.client.gui.CraftTreeScreen;
 import com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver;
+import com.kumanchu.crafttreeplanner.integration.ModIntegration;
 import com.kumanchu.crafttreeplanner.integration.jei.JeiHover;
 import com.kumanchu.crafttreeplanner.integration.rei.ReiHover;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -20,7 +21,6 @@ import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.lwjgl.glfw.GLFW;
 
-import java.lang.reflect.Method;
 import java.util.Optional;
 
 /**
@@ -131,24 +131,15 @@ public final class KeyInputHandler {
             }
         }
 
-        // 1) Refined Storage Grid Screen
+        // 1) Refined Storage Grid Screen（正式API: AbstractGridScreen#getCurrentGridResource）
         try {
-            if (screen != null && screen.getClass().getName().contains("GridScreen")) {
-                Method getCurrent = findMethod(screen.getClass(), "getCurrentGridResource");
-                if (getCurrent != null) {
-                    Object gridRes = getCurrent.invoke(screen);
-                    if (gridRes != null) {
-                        Method mKey = findMethod(gridRes.getClass(), "getResourceForRecipeMods");
-                        Object key = mKey != null ? mKey.invoke(gridRes) : null;
-                        if (key != null) {
-                            Method toStack = findMethod(key.getClass(), "toItemStack");
-                            if (toStack != null) {
-                                Object res = toStack.invoke(key);
-                                if (res instanceof ItemStack is && !is.isEmpty()) {
-                                    return Optional.of(is.copy());
-                                }
-                            }
-                        }
+            if (ModIntegration.isRefinedStorageLoaded()
+                    && screen instanceof com.refinedmods.refinedstorage.common.grid.screen.AbstractGridScreen<?> gridScreen) {
+                com.refinedmods.refinedstorage.common.api.grid.view.GridResource gridResource = gridScreen.getCurrentGridResource();
+                if (gridResource instanceof com.refinedmods.refinedstorage.common.grid.view.ItemGridResource itemGridResource) {
+                    ItemStack is = itemGridResource.getItemStack();
+                    if (is != null && !is.isEmpty()) {
+                        return Optional.of(is.copy());
                     }
                 }
             }
@@ -201,26 +192,5 @@ public final class KeyInputHandler {
         } catch (Throwable t) {
             CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] openTree failed", t);
         }
-    }
-
-    private static Method findMethod(Class<?> c, String name) {
-        try {
-            for (Class<?> cur = c; cur != null && cur != Object.class; cur = cur.getSuperclass()) {
-                for (Method m : cur.getDeclaredMethods()) {
-                    if (m.getName().equals(name) && m.getParameterCount() == 0) {
-                        m.setAccessible(true);
-                        return m;
-                    }
-                }
-            }
-            for (Method m : c.getMethods()) {
-                if (m.getName().equals(name) && m.getParameterCount() == 0) {
-                    m.setAccessible(true);
-                    return m;
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
     }
 }

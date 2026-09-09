@@ -33,6 +33,13 @@ repositories {
             includeGroup "mezz.jei"
         }
     }
+    // Refined Storage (same repository used by RS's own addon projects)
+    maven {
+        url "https://maven.creeperhost.net/"
+        content {
+            includeGroup "com.refinedmods.refinedstorage"
+        }
+    }
 }
 
 base {
@@ -115,6 +122,11 @@ dependencies {
     compileOnly "mezz.jei:jei-1.21.1-common-api:${jei_version}"
     compileOnly "mezz.jei:jei-1.21.1-neoforge-api:${jei_version}"
     localRuntime "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
+
+    // Refined Storage 2: compiled against the full mod jar (covers internal grid classes
+    // such as AbstractGridContainerMenu that the published *-api modules do not include).
+    // Runtime is still optional: integration code is guarded by ModIntegration.isRefinedStorageLoaded().
+    compileOnly "com.refinedmods.refinedstorage:refinedstorage-neoforge:${refinedstorage_version}"
 
 
     // Example mod dependency using a mod jar from ./libs with a flat dir repository
