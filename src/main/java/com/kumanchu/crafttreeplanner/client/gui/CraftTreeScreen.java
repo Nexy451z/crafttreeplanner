@@ -101,6 +101,8 @@ public class CraftTreeScreen extends Screen {
             {48, 6000, 5000},
     };
     private static int limitPresetIndex = 1;
+    @Nullable
+    private Button limitPresetBtn;
 
     // バックグラウンド再計算
     private static final java.util.concurrent.ExecutorService RESOLVE_EXECUTOR =
@@ -128,6 +130,9 @@ public class CraftTreeScreen extends Screen {
     private void cycleLimitPreset() {
         limitPresetIndex = (limitPresetIndex + 1) % LIMIT_PRESETS.length;
         applyLimitPreset();
+        if (limitPresetBtn != null) {
+            limitPresetBtn.setMessage(Component.literal(limitPresetLabel()));
+        }
         recompute();
     }
 
@@ -560,7 +565,7 @@ public class CraftTreeScreen extends Screen {
 
         // 0. 探索上限プリセット
         curRight -= 76;
-        addRenderableWidget(Button.builder(Component.literal(limitPresetLabel()), b -> cycleLimitPreset())
+        limitPresetBtn = addRenderableWidget(Button.builder(Component.literal(limitPresetLabel()), b -> cycleLimitPreset())
                 .bounds(curRight, btnY, 76, btnH).build());
 
         curRight -= 4; // 区切り
