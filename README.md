@@ -1,4 +1,4 @@
-# CraftTreePlanner
+# NexCraftTree
 
 A crafting tree planner mod for **Minecraft 1.21.1** with **NeoForge 21.1.x**.
 Hover over any item and open a full crafting tree (AE2-style): it shows what you already own, what you need to craft, and what you are missing — across your inventory, Refined Storage, and Applied Energistics 2. Then craft everything with one click.
@@ -12,7 +12,7 @@ Hover over any item and open a full crafting tree (AE2-style): it shows what you
 - **Multi-station support** — recipes are found via JEI for *all* machine types (furnace, blast furnace, smoker, stonecutter, smithing, and modded machines like alloy smelters); click the station box to pick a method, then a specific recipe within it
 - **Workstation slot** — pin a preferred machine; recipes from that station are prioritized in both planning and execution
 - **One-click direct crafting** — pulls ingredients straight from your inventory (and the open RS grid), crafts all intermediate steps on the server, and hands you the result; failed steps roll back everything
-- **Configurable search limits** — 4 presets (light / normal / large / huge) for depth, node count and time budget; searches run on a background thread with a live progress bar; further tuning via `config/crafttreeplanner-client.toml`
+- **Configurable search limits** — 4 presets (light / normal / large / huge) for depth, node count and time budget; searches run on a background thread with a live progress bar; further tuning via `config/nexcrafttree-client.toml`
 - **Recipe viewer hooks** — left click / `R` opens recipes, right click / `U` opens usages (uses your JEI/REI keybinds)
 - **Cycle & runaway protection** — self-feeding recipes, compression-block "reverse crafting" loops, deep recursion and huge modpacks are all bounded (search budget, node cap, per-lookup timeout with an O(1) vanilla recipe index + session-wide candidate cache)
 - **Languages** — English and Japanese (`en_us` / `ja_jp`)
@@ -74,7 +74,7 @@ To test inside the dev client with JEI installed, the `localRuntime` dependency 
 ## Install (players)
 
 1. Install [NeoForge](https://neoforged.net/) 21.1.235+ for Minecraft 1.21.1
-2. Drop the built jar (`crafttreeplanner-<version>.jar`) into your `mods` folder
+2. Drop the built jar (`nexcrafttree-<version>.jar`) into your `mods` folder
 3. Optional: add JEI / Refined Storage / AE2 for the full experience
 
 ## Roadmap / Known limitations
@@ -86,4 +86,7 @@ To test inside the dev client with JEI installed, the `localRuntime` dependency 
 ## License
 
 MIT
+
+
+
 
