@@ -56,6 +56,20 @@ public class DirectCraftingEngine {
     }
 
     @SubscribeEvent
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            flushPendingOutputToInventory(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            flushPendingOutputToInventory(player);
+        }
+    }
+
+    @SubscribeEvent
     public static void onContainerClosed(PlayerContainerEvent.Close event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             flushPendingOutputToInventory(player);
@@ -97,29 +111,43 @@ public class DirectCraftingEngine {
         execute(player, targetItem, quantity, steps, ItemStack.EMPTY);
     }
 
+    /** 1プレイヤーあたりの実行クールダウン(ms)と合計実行数の上限（サーバー保護） */
+    private static final long EXECUTE_COOLDOWN_MS = 1000;
+    private static final int MAX_TOTAL_EXECUTIONS = 20000;
+    private static final Map<UUID, Long> lastExecuteMs = new ConcurrentHashMap<>();
+
     public static void execute(ServerPlayer player, ItemStack targetItem, int quantity, List<DirectCraftStep> steps, ItemStack slottedWorkstation) {
         ServerLevel level = player.serverLevel();
 
         // 既存の未回収品があれば先にインベントリに格納
         flushPendingOutputToInventory(player);
 
-        if (steps == null || steps.isEmpty()) {
-            PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
-                    false, Component.translatable("msg.crafttreeplanner.no_steps"), ItemStack.EMPTY, 0
-            ));
+        if (steps == null || steps.isEmpty() || steps.size() > 256) {
+            reject(player, Component.translatable("msg.crafttreeplanner.no_steps"));
             return;
         }
-        // サーバー保護: 異常に大きいリクエストの拒否
-        if (steps.size() > 256) {
-            PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
-                    false, Component.translatable("msg.crafttreeplanner.no_steps"), ItemStack.EMPTY, 0
-            ));
+        int totalExecutions = 0;
+        for (DirectCraftStep step : steps) {
+            int count = step.count();
+            if (count < 0 || count > 4096) {
+                reject(player, Component.translatable("msg.crafttreeplanner.too_large"));
+                return;
+            }
+            totalExecutions += count;
+        }
+        if (totalExecutions > MAX_TOTAL_EXECUTIONS) {
+            reject(player, Component.translatable("msg.crafttreeplanner.too_large"));
             return;
         }
+        long now = System.currentTimeMillis();
+        Long last = lastExecuteMs.get(player.getUUID());
+        if (last != null && now - last < EXECUTE_COOLDOWN_MS) {
+            reject(player, Component.translatable("msg.crafttreeplanner.cooldown"));
+            return;
+        }
+        lastExecuteMs.put(player.getUUID(), now);
 
         List<ItemStack> intermediatePool = new ArrayList<>();
-        List<ItemStack> extractedFromPlayer = new ArrayList<>();
-        List<ItemStack> extractedFromRs = new ArrayList<>();
         List<ItemStack> producedRemainders = new ArrayList<>();
 
         // 必要設備の事前バリデーション（作業台以外の加工機をプレイヤーが所持しているか確認）
@@ -128,7 +156,8 @@ public class DirectCraftingEngine {
             if (stationIcon != null && !stationIcon.isEmpty() && !stationIcon.is(Items.CRAFTING_TABLE)) {
                 if (!isStationAvailable(player, stationIcon, slottedWorkstation)) {
                     String stationName = stationIcon.getHoverName().getString();
-                    rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                    rollback(player, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
+                            intermediatePool, producedRemainders,
                             Component.translatable("msg.crafttreeplanner.station_missing", stationName));
                     return;
                 }
@@ -140,11 +169,12 @@ public class DirectCraftingEngine {
         for (int stepIdx = 0; stepIdx < steps.size(); stepIdx++) {
             DirectCraftStep step = steps.get(stepIdx);
             ResourceLocation recipeId = step.recipeId();
-            int executions = Math.max(1, Math.min(4096, step.count()));
+            int executions = Math.max(1, step.count());
 
             Optional<RecipeHolder<?>> recipeOpt = level.getRecipeManager().byKey(recipeId);
             if (recipeOpt.isEmpty()) {
-                rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                rollback(player, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
+                        intermediatePool, producedRemainders,
                         Component.translatable("msg.crafttreeplanner.recipe_not_found", String.valueOf(recipeId)));
                 return;
             }
@@ -154,6 +184,11 @@ public class DirectCraftingEngine {
 
             for (int exec = 0; exec < executions; exec++) {
                 ItemStack assembled = ItemStack.EMPTY;
+
+                // この実行1回分で引き抜いた素材。完了したら消費扱い、失敗時のみロールバック対象
+                List<ItemStack> execExtractedPlayer = new ArrayList<>();
+                List<ItemStack> execExtractedRs = new ArrayList<>();
+                List<ItemStack> execPoolTaken = new ArrayList<>();
 
                 if (rawRecipe instanceof CraftingRecipe craftingRecipe) {
                     CraftingInput craftingInput;
@@ -167,10 +202,10 @@ public class DirectCraftingEngine {
                             Ingredient ing = ingredients.get(i);
                             if (ing.isEmpty()) continue;
 
-                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
+                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                             if (extracted.isEmpty()) {
-                                rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
+                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
                             inputItems.set(i, extracted);
@@ -184,10 +219,10 @@ public class DirectCraftingEngine {
                             Ingredient ing = ingredients.get(i);
                             if (ing.isEmpty()) continue;
 
-                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
+                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                             if (extracted.isEmpty()) {
-                                rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
+                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
                             inputItems.set(i, extracted);
@@ -197,7 +232,7 @@ public class DirectCraftingEngine {
 
                     assembled = craftingRecipe.assemble(craftingInput, level.registryAccess());
                     if (assembled.isEmpty()) {
-                        rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
                                 Component.translatable("msg.crafttreeplanner.assemble_failed", String.valueOf(recipeId)));
                         return;
                     }
@@ -227,9 +262,9 @@ public class DirectCraftingEngine {
                             int needCount = Math.max(1, need.getCount());
                             ItemStack template = need.copyWithCount(1);
                             for (int k = 0; k < needCount; k++) {
-                                ItemStack extracted = pullExact(player, template, intermediatePool, extractedFromPlayer, extractedFromRs);
+                                ItemStack extracted = pullExact(player, template, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                                 if (extracted.isEmpty()) {
-                                    rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                                    rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
                                             Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                                     return;
                                 }
@@ -243,9 +278,9 @@ public class DirectCraftingEngine {
                     } else {
                         for (Ingredient ing : ingredients) {
                             if (ing.isEmpty()) continue;
-                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
+                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                             if (extracted.isEmpty()) {
-                                rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
                                         Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
@@ -275,21 +310,10 @@ public class DirectCraftingEngine {
                         }
                     }
 
-                    // 3. サーバーでレシピ出力が取得できた場合、クライアントの期待出力よりレシピ出力を優先（改ざん対策）
-                    ItemStack expected = step.expectedOutput();
-                    if (!assembled.isEmpty() && expected != null && !expected.isEmpty()
-                            && !ItemStack.isSameItemSameComponents(assembled, expected)) {
-                        // 出力種が食い違う場合はレシピ側を正とする
-                        expected = null;
-                    }
-
-                    // 4. レシピから出力が取れない特殊レシピのみ、消費済みの前提でクライアント出力を採用
-                    if (assembled.isEmpty() && expected != null && !expected.isEmpty()) {
-                        assembled = expected.copyWithCount(Math.max(1, expected.getCount()));
-                    }
-
+                    // クライアント送信のexpectedOutputは改ざん可能なため出力のmintには使用しない。
+                    // レシピから出力が取れないレシピは実行不可としてロールバックする
                     if (assembled.isEmpty()) {
-                        rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
                                 Component.translatable("msg.crafttreeplanner.process_failed", String.valueOf(recipeId)));
                         return;
                     }
@@ -340,10 +364,17 @@ public class DirectCraftingEngine {
         ));
     }
 
+    private static void reject(ServerPlayer player, Component message) {
+        PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
+                false, message, ItemStack.EMPTY, 0
+        ));
+    }
+
     private static ItemStack pullIngredient(
             ServerPlayer player,
             Ingredient ing,
             List<ItemStack> intermediatePool,
+            List<ItemStack> poolTaken,
             List<ItemStack> extractedFromPlayer,
             List<ItemStack> extractedFromRs
     ) {
@@ -355,6 +386,7 @@ public class DirectCraftingEngine {
                 if (poolStack.isEmpty()) {
                     intermediatePool.remove(i);
                 }
+                poolTaken.add(single.copy());
                 return single;
             }
         }
@@ -414,6 +446,7 @@ public class DirectCraftingEngine {
             ServerPlayer player,
             ItemStack template,
             List<ItemStack> intermediatePool,
+            List<ItemStack> poolTaken,
             List<ItemStack> extractedFromPlayer,
             List<ItemStack> extractedFromRs
     ) {
@@ -425,6 +458,7 @@ public class DirectCraftingEngine {
                 if (poolStack.isEmpty()) {
                     intermediatePool.remove(i);
                 }
+                poolTaken.add(single.copy());
                 return single;
             }
         }
@@ -465,13 +499,26 @@ public class DirectCraftingEngine {
         return ItemStack.EMPTY;
     }
 
+    /**
+     * 失敗時の巻き戻し。
+     * poolTaken: 失敗した実行が中間プールから取り出した分 → プールに戻す
+     * extractedFromPlayer / extractedFromRs: 失敗した実行で引き抜いた未消費素材 → 所持品/RSに返す
+     * intermediatePool: 未使用の中間品 → 所持品に返す（先行工程の実物換算）
+     * producedRemainders: 生成済みの残余（バケツ等） → 所持品に返す
+     * 先行工程の素材は中間品に変換済みのため返却せず、二重還元を防ぐ
+     */
     private static void rollback(
             ServerPlayer player,
             List<ItemStack> extractedFromPlayer,
             List<ItemStack> extractedFromRs,
+            List<ItemStack> poolTaken,
             List<ItemStack> intermediatePool,
+            List<ItemStack> producedRemainders,
             Component message
     ) {
+        if (poolTaken != null && !poolTaken.isEmpty()) {
+            intermediatePool.addAll(poolTaken);
+        }
         for (ItemStack stack : extractedFromPlayer) {
             if (!stack.isEmpty()) {
                 if (!player.getInventory().add(stack)) {
@@ -490,6 +537,13 @@ public class DirectCraftingEngine {
             }
         }
         for (ItemStack stack : intermediatePool) {
+            if (!stack.isEmpty()) {
+                if (!player.getInventory().add(stack)) {
+                    player.drop(stack, false);
+                }
+            }
+        }
+        for (ItemStack stack : producedRemainders) {
             if (!stack.isEmpty()) {
                 if (!player.getInventory().add(stack)) {
                     player.drop(stack, false);

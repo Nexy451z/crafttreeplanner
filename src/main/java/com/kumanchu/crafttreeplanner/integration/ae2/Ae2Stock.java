@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.List;
 
 /**
  * AE2在庫取得。コンパイル依存なし（リフレクションのみ）。
@@ -61,6 +62,33 @@ public class Ae2Stock implements IStockProvider {
         } catch (Throwable t) {
             CraftTreePlanner.LOGGER.debug("[CraftTreePlanner] AE2 stock failed: {}", t.toString());
             return 0;
+        }
+    }
+
+    /**
+     * メインスレッドから呼ぶこと。AE2端末のクライアントリポジトリを不変スナップショットとして取り込む。
+     */
+    public static List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> captureEntries() {
+        try {
+            Ae2Stock temp = new Ae2Stock();
+            if (!temp.isAvailable()) return List.of();
+            Object repo = temp.getClientRepo();
+            if (repo == null) return List.of();
+            Collection<?> entries = temp.getAllEntries(repo);
+            if (entries == null) return List.of();
+            List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> out = new java.util.ArrayList<>();
+            for (Object e : entries) {
+                try {
+                    ItemStack what = temp.extractItem(e);
+                    if (what == null || what.isEmpty()) continue;
+                    out.add(new com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry(
+                            what.copy(), temp.extractStored(e), temp.extractCraftable(e)));
+                } catch (Throwable ignored) {
+                }
+            }
+            return List.copyOf(out);
+        } catch (Throwable t) {
+            return List.of();
         }
     }
 

@@ -23,7 +23,7 @@ public record DirectCraftStep(ResourceLocation recipeId, int count, ItemStack st
             ByteBufCodecs.VAR_INT, DirectCraftStep::count,
             ItemStack.OPTIONAL_STREAM_CODEC, DirectCraftStep::stationIcon,
             ItemStack.OPTIONAL_STREAM_CODEC, DirectCraftStep::expectedOutput,
-            ItemStack.OPTIONAL_STREAM_CODEC.apply(ByteBufCodecs.list()), DirectCraftStep::inputs,
+            ItemStack.OPTIONAL_STREAM_CODEC.apply(ByteBufCodecs.list(16)), DirectCraftStep::inputs,
             DirectCraftStep::new
     );
 }

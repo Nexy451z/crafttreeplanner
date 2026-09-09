@@ -9,23 +9,21 @@ Hover over any item and open a full crafting tree (AE2-style): it shows what you
 
 - **Crafting tree GUI** — bottom-up recipe tree for the hovered/held item, including intermediate steps
 - **Stock-aware planning** — counts your inventory, Refined Storage grid contents, and AE2 ME storage as one shared stock pool; badges show `Stock / Craft / Missing` per node
-- **Multi-station support** — recipes are found via JEI for *all* machine types (furnace, blast furnace, smoker, stonecutter, smithing, and modded machines like alloy smelters); click the station box to switch between alternative methods
+- **Multi-station support** — recipes are found via JEI for *all* machine types (furnace, blast furnace, smoker, stonecutter, smithing, and modded machines like alloy smelters); click the station box to pick a method, then a specific recipe within it
 - **Workstation slot** — pin a preferred machine; recipes from that station are prioritized in both planning and execution
 - **One-click direct crafting** — pulls ingredients straight from your inventory (and the open RS grid), crafts all intermediate steps on the server, and hands you the result; failed steps roll back everything
-- **Craft-all (sequential mode)** — automate the whole tree through a vanilla crafting table or the RS Crafting Grid
+- **Configurable search limits** — 4 presets (light / normal / large / huge) for depth, node count and time budget; searches run on a background thread with a live progress bar; further tuning via `config/crafttreeplanner-client.toml`
 - **Recipe viewer hooks** — left click / `R` opens recipes, right click / `U` opens usages (uses your JEI/REI keybinds)
 - **Cycle & runaway protection** — self-feeding recipes, compression-block "reverse crafting" loops, deep recursion and huge modpacks are all bounded (search budget, node cap, per-lookup timeout with an O(1) vanilla recipe index + session-wide candidate cache)
 - **Languages** — English and Japanese (`en_us` / `ja_jp`)
 
 ## Usage
 
-1. Hover an item in any inventory / terminal / recipe viewer (or hold it in your main hand) and press **C** (rebindable, `Open Crafting Tree`).
-2. Set the desired amount (input box, `+/-`, or `x1/x10/x64` presets). The tree recomputes instantly.
-3. Optional: set a **workstation** (bottom-left slot) to prefer a specific machine.
-4. Press **Create** (header) or **Craft All** (footer):
-   - **Create** = *direct craft*: ingredients are pulled from your inventory + the open RS grid, all steps run server-side, result appears in the **Result slot** (click to collect). Nothing is consumed if a step fails.
-   - **Craft All** = *sequential*: the executor drives an open crafting table / RS Crafting Grid step by step.
-5. Left-click an item icon to see its recipe in JEI/REI, right-click for usages.
+ 1. Hover an item in any inventory / terminal / recipe viewer (or hold it in your main hand) and press **C** (rebindable, `Open Crafting Tree`).
+ 2. Set the desired amount (input box, `+/-`, or `x1/x10/x64` presets). The tree recomputes in the background (progress bar at the bottom).
+ 3. Optional: set a **workstation** (bottom-left slot) to prefer a specific machine.
+ 4. Press **Create** (header) or **Craft All** (footer) — both run *direct craft*: ingredients are pulled from your inventory + the open RS grid, all steps run server-side, result appears in the **Result slot** (click to collect). Nothing is consumed if a step fails.
+ 5. Left-click an item icon to see its recipe in JEI/REI, right-click for usages.
 
 > **Note:** RS/AE2 stock is read from the *currently open* terminal screen. Open your RS grid or ME terminal while planning to include network storage.
 
@@ -79,4 +77,5 @@ To test inside the dev client with JEI installed, the `localRuntime` dependency 
 
 ## License
 
-MIT — see `TEMPLATE_LICENSE.txt` inherited header handling in `neoforge.mods.toml` (`${mod_license}`).
+MIT
+

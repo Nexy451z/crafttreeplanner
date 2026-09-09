@@ -90,6 +90,8 @@
   "msg.crafttreeplanner.ingredient_missing": "§c[CraftTree] Required ingredient not found (step: %s)",
   "msg.crafttreeplanner.assemble_failed": "§c[CraftTree] Failed to assemble recipe (step: %s)",
   "msg.crafttreeplanner.process_failed": "§c[CraftTree] Failed to process recipe (step: %s)",
+  "msg.crafttreeplanner.too_large": "§c[CraftTree] Request too large - lower the amount.",
+  "msg.crafttreeplanner.cooldown": "§c[CraftTree] Please wait a moment before crafting again.",
   "msg.crafttreeplanner.done": "§a✔ Craft complete! Collect from the result slot",
 
   "msg.crafttreeplanner.seq.missing": "§c[CraftTree] Missing materials - bulk craft unavailable. Gather the materials first.",
@@ -102,3 +104,4 @@
   "msg.crafttreeplanner.seq.cancel_closed": "Auto craft cancelled: screen was closed",
   "msg.crafttreeplanner.seq.cancel_transfer": "Cancelled: ingredients could not be placed into the grid (missing or transfer incomplete)"
 }
+

@@ -42,11 +42,14 @@ displayName="${mod_name}" #mandatory
 #credits="" #optional
 
 # The authors of the mod, displayed in the mod UI (optional)
-#authors=""
+authors="Nexy451z"
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-Example mod description.
+AE2-style crafting tree planner: hover an item, press C, and see the full
+crafting tree with your inventory / Refined Storage / AE2 stock accounted for.
+Missing materials, alternative crafting methods and one-click direct crafting
+are all supported. Integrates with JEI / REI, Refined Storage and AE2 (all optional).
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.

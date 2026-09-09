@@ -68,7 +68,7 @@ public class RecipeResolver {
     private long deadline = 0;
     private final Map<net.minecraft.world.item.Item, Long> consumed = new HashMap<>();
     /** セッション共有のレシピ候補キャッシュ（未ソート・レシピ再読込時にinvalidateCachesで破棄） */
-    private static final Map<net.minecraft.world.item.Item, List<PlannedRecipe>> candidateCache = new ConcurrentHashMap<>();
+    private static final Map<net.minecraft.world.item.Item, CacheEntry> candidateCache = new ConcurrentHashMap<>();
 
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level) {
         return resolve(target, wantCount, stock, level, null);
@@ -356,9 +356,18 @@ public class RecipeResolver {
         return list;
     }
 
+    /** キャッシュ世代。invalidateCachesで加算され、世代不一致のエントリは無効扱い */
+    private static final java.util.concurrent.atomic.AtomicLong CACHE_GENERATION = new java.util.concurrent.atomic.AtomicLong(0);
+    private record CacheEntry(List<PlannedRecipe> list, long generation) {
+    }
+    /** 探索結果と完了フラグ（期限打ち切りの部分的結果はキャッシュしないため） */
+    public record CandidateFind(List<PlannedRecipe> recipes, boolean complete) {
+    }
+
     /**
      * レシピ候補の取得。セッション共有キャッシュにヒットすればJEI/バニラ問い合わせをスキップする。
      * キャッシュは未ソートの生候補を保持し、ソートは現在の設備・在庫で毎回行う。
+     * キャッシュミスの重い探索には猶予deadline（全タイムアウト分）を与え、部分的結果はキャッシュしない。
      */
     private List<PlannedRecipe> getOrFindCandidateRecipes(
             ItemStack target,
@@ -368,34 +377,50 @@ public class RecipeResolver {
     ) {
         if (target == null || target.isEmpty()) return Collections.emptyList();
         net.minecraft.world.item.Item item = target.getItem();
-        List<PlannedRecipe> raw = candidateCache.get(item);
-        if (raw == null) {
-            // 期限切れ後は新しい重い探索を開始しない（ゲームフリーズ防止の安全弁）
-            if (System.currentTimeMillis() > deadline) return Collections.emptyList();
-            raw = findAllCandidateRecipes(target, level, activeWorkstation, stock, deadline);
-            candidateCache.put(item, raw);
+        long gen = CACHE_GENERATION.get();
+        CacheEntry cached = candidateCache.get(item);
+        if (cached != null && cached.generation() == gen) {
+            List<PlannedRecipe> sorted = new ArrayList<>(cached.list());
+            sortCandidates(sorted, target, activeWorkstation, stock);
+            return sorted;
         }
-        List<PlannedRecipe> sorted = new ArrayList<>(raw);
+        // ツリー全体の残り予算が尽きていても、初回の候補探索には猶予を与える（部分的キャッシュの抑制）
+        long now = System.currentTimeMillis();
+        long findDeadline = Math.max(deadline, now + timeoutMs());
+        if (now > deadline && now >= findDeadline) return Collections.emptyList();
+        CandidateFind find = findAllCandidateRecipes(target, level, activeWorkstation, stock, findDeadline);
+        if (find != null && find.complete()) {
+            candidateCache.put(item, new CacheEntry(find.recipes(), gen));
+        }
+        List<PlannedRecipe> sorted = new ArrayList<>(find == null ? Collections.<PlannedRecipe>emptyList() : find.recipes());
         sortCandidates(sorted, target, activeWorkstation, stock);
         return sorted;
-    }    /** レシピ再読込（データパック更新・サーバー同期）時に全キャッシュを破棄する */
+    }
+
+    /** レシピ再読込（データパック更新・サーバー同期）時に全キャッシュを破棄する */
     public static void invalidateCaches() {
+        CACHE_GENERATION.incrementAndGet();
         candidateCache.clear();
-        vanillaRecipeIndex = null;
-        lastRecipeManager = null;
+        synchronized (RecipeResolver.class) {
+            vanillaRecipeIndex = null;
+            lastRecipeManager = null;
+            lastVanillaIndexGeneration = -1;
+        }
     }
 
     private static volatile Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> vanillaRecipeIndex = null;
     private static volatile Object lastRecipeManager = null;
+    private static long lastVanillaIndexGeneration = -1;
 
     private static void ensureVanillaIndex(Level level) {
         if (level == null) return;
+        long gen = CACHE_GENERATION.get();
         Object currentRm = level.getRecipeManager();
-        if (vanillaRecipeIndex != null && lastRecipeManager == currentRm) {
+        if (vanillaRecipeIndex != null && lastRecipeManager == currentRm && lastVanillaIndexGeneration == gen) {
             return;
         }
         synchronized (RecipeResolver.class) {
-            if (vanillaRecipeIndex != null && lastRecipeManager == currentRm) {
+            if (vanillaRecipeIndex != null && lastRecipeManager == currentRm && lastVanillaIndexGeneration == gen) {
                 return;
             }
             Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> index = new HashMap<>();
@@ -415,6 +440,7 @@ public class RecipeResolver {
             }
             vanillaRecipeIndex = index;
             lastRecipeManager = currentRm;
+            lastVanillaIndexGeneration = gen;
         }
     }
 
@@ -426,18 +452,19 @@ public class RecipeResolver {
 
     /**
      * 出力アイテムを作成可能なすべてのレシピ候補（作業台、かまど、合金製錬機、冶金注入機等）を探索して返す
-     * @param deadline この時刻を過ぎたら残りカテゴリ・レシピの探索を打ち切る（結果は部分的になり得る）
+     * @param deadline この時刻を過ぎたら残りカテゴリ・レシピの探索を打ち切る（部分的結果はcomplete=false）
      */
-    public static List<PlannedRecipe> findAllCandidateRecipes(
+    public static CandidateFind findAllCandidateRecipes(
             ItemStack target,
             Level level,
             @Nullable ItemStack activeWorkstation,
             @Nullable UnifiedStockSnapshot stock,
             long deadline
     ) {
-        if (target == null || target.isEmpty()) return Collections.emptyList();
+        if (target == null || target.isEmpty()) return new CandidateFind(Collections.emptyList(), true);
         List<PlannedRecipe> list = new ArrayList<>();
         Set<ResourceLocation> seenRecipeIds = new HashSet<>();
+        boolean[] complete = {true};
 
         // 1. JEI からの全加工カテゴリ探索
         try {
@@ -456,7 +483,10 @@ public class RecipeResolver {
                         .toList();
 
                 for (IRecipeCategory<?> cat : categories) {
-                    if (System.currentTimeMillis() > deadline) break; // カテゴリ間でも期限チェック（プラグイン遅延対策）
+                    if (System.currentTimeMillis() > deadline) {
+                        complete[0] = false; // カテゴリ間でも期限チェック（プラグイン遅延対策）
+                        break;
+                    }
                     RecipeType<?> recipeType = cat.getRecipeType();
                     String catId = recipeType.getUid().toString();
                     String catPath = recipeType.getUid().getPath().toLowerCase(Locale.ROOT);
@@ -511,7 +541,10 @@ public class RecipeResolver {
                     }
 
                     for (Object r : recipes) {
-                        if (System.currentTimeMillis() > deadline) break;
+                        if (System.currentTimeMillis() > deadline) {
+                            complete[0] = false;
+                            break;
+                        }
                         RecipeHolder<?> holder = (r instanceof RecipeHolder<?> h) ? h : null;
                         ResourceLocation recipeId = holder != null ? holder.id() : null;
                         if (recipeId != null && seenRecipeIds.contains(recipeId)) {
@@ -614,7 +647,7 @@ public class RecipeResolver {
 
         // ソートは設備・在庫依存のためキャッシュ可能なこの段階では行わない（getOrFindCandidateRecipesで実施）
         dedupeCandidates(list);
-        return list;
+        return new CandidateFind(list, complete[0]);
     }
 
     /**
@@ -802,7 +835,8 @@ public class RecipeResolver {
 
     /** 互換用：単一レシピ探索 */
     public static RecipeHolder<?> findRecipe(ItemStack target, Level level) {
-        List<PlannedRecipe> candidates = findAllCandidateRecipes(target, level, null, null, System.currentTimeMillis() + timeoutMs());
+        CandidateFind find = findAllCandidateRecipes(target, level, null, null, System.currentTimeMillis() + timeoutMs());
+        List<PlannedRecipe> candidates = new ArrayList<>(find.recipes());
         sortCandidates(candidates, target, null, null);
         return candidates.isEmpty() ? null : candidates.get(0).getRecipeHolder();
     }

@@ -90,6 +90,8 @@
   "msg.crafttreeplanner.ingredient_missing": "§c[CraftTree] 必要素材が見つかりませんでした (工程: %s)",
   "msg.crafttreeplanner.assemble_failed": "§c[CraftTree] レシピの合成に失敗しました (工程: %s)",
   "msg.crafttreeplanner.process_failed": "§c[CraftTree] レシピの加工に失敗しました (工程: %s)",
+  "msg.crafttreeplanner.too_large": "§c[CraftTree] 要求が大きすぎます。数量を減らしてください。",
+  "msg.crafttreeplanner.cooldown": "§c[CraftTree] 連続実行は少し待ってください。",
   "msg.crafttreeplanner.done": "§a✔ クラフト完了！ 完成品スロットから回収できます",
 
   "msg.crafttreeplanner.seq.missing": "§c[CraftTree] 不足素材があるため一括作成できません。素材を揃えてください。",
@@ -102,3 +104,4 @@
   "msg.crafttreeplanner.seq.cancel_closed": "画面が閉じられたためクラフトを中断しました",
   "msg.crafttreeplanner.seq.cancel_transfer": "クラフト素材の配置が完了しませんでした（素材が不足しているか、グリッドへの転送が完了していません）"
 }
+

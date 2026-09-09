@@ -108,54 +108,28 @@ public class RefinedStorageStock implements IStockProvider {
     }
 
     /**
-     * RS Crafting Grid（クラフトグリッド）が開いている場合、レシピの材料を3x3マトリクスに配置する。
-     * 正式経路: AbstractCraftingGridContainerMenu#transferRecipe(List&lt;List&lt;ItemResource&gt;&gt;)
+     * メインスレッドから呼ぶこと。RSグリッドのビューを不変スナップショットとして取り込む。
+     * （バックグラウンド計算スレッドからリポジトリのライブデータを直接読まないための措置）
      */
-    public static boolean transferRecipeToCraftingGrid(net.minecraft.world.inventory.AbstractContainerMenu menu,
-                                                       net.minecraft.world.item.crafting.RecipeHolder<?> recipe) {
-        if (menu == null || recipe == null) return false;
+    public static List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> captureEntries() {
         try {
-            if (!(menu instanceof com.refinedmods.refinedstorage.common.grid.AbstractCraftingGridContainerMenu craftingGridMenu)) {
-                return false;
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null || !(mc.player.containerMenu instanceof AbstractGridContainerMenu menu)) {
+                return List.of();
             }
-            ResourceRepository<com.refinedmods.refinedstorage.common.api.grid.view.GridResource> repo = craftingGridMenu.getRepository();
-
-            List<List<ItemResource>> slots = new java.util.ArrayList<>(9);
-            for (int i = 0; i < 9; i++) {
-                slots.add(new java.util.ArrayList<>());
+            ResourceRepository<com.refinedmods.refinedstorage.common.api.grid.view.GridResource> repo = menu.getRepository();
+            if (repo == null) return List.of();
+            List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> out = new java.util.ArrayList<>();
+            for (com.refinedmods.refinedstorage.common.api.grid.view.GridResource gridResource : repo.getViewList()) {
+                if (!(gridResource instanceof ItemGridResource itemGridResource)) continue;
+                ItemStack item = itemGridResource.getItemStack();
+                if (item == null || item.isEmpty()) continue;
+                out.add(new com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry(
+                        item.copy(), gridResource.getAmount(repo), gridResource.isAutocraftable(repo)));
             }
-
-            if (recipe.value() instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
-                int width = shaped.getWidth();
-                int height = shaped.getHeight();
-                List<net.minecraft.world.item.crafting.Ingredient> ingredients = shaped.getIngredients();
-                for (int r = 0; r < height && r < 3; r++) {
-                    for (int c = 0; c < width && c < 3; c++) {
-                        int idx = r * width + c;
-                        if (idx < ingredients.size()) {
-                            net.minecraft.world.item.crafting.Ingredient ing = ingredients.get(idx);
-                            if (ing != null && !ing.isEmpty()) {
-                                int gridSlot = r * 3 + c;
-                                populateSlotPossibilities(slots.get(gridSlot), ing, repo);
-                            }
-                        }
-                    }
-                }
-            } else {
-                List<net.minecraft.world.item.crafting.Ingredient> ingredients = recipe.value().getIngredients();
-                for (int i = 0; i < ingredients.size() && i < 9; i++) {
-                    net.minecraft.world.item.crafting.Ingredient ing = ingredients.get(i);
-                    if (ing != null && !ing.isEmpty()) {
-                        populateSlotPossibilities(slots.get(i), ing, repo);
-                    }
-                }
-            }
-
-            craftingGridMenu.transferRecipe(slots);
-            return true;
+            return List.copyOf(out);
         } catch (Throwable t) {
-            CraftTreePlanner.LOGGER.debug("[CraftTreePlanner] RS transferRecipe failed", t);
-            return false;
+            return List.of();
         }
     }
 

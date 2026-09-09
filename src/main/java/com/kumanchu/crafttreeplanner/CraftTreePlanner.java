@@ -20,7 +20,6 @@ public class CraftTreePlanner {
         modEventBus.addListener(com.kumanchu.crafttreeplanner.network.CraftTreeNetwork::register);
         if (FMLEnvironment.dist == Dist.CLIENT) {
             KeyInputHandler.register(modEventBus);
-            com.kumanchu.crafttreeplanner.client.crafting.SequentialCraftingExecutor.init();
         }
     }
 }

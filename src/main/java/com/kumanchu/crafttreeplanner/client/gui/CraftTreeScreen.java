@@ -111,7 +111,8 @@ public class CraftTreeScreen extends Screen {
                 t.setDaemon(true);
                 return t;
             });
-    private int recomputeSeq = 0;
+    private volatile int recomputeSeq = 0;
+    private int debounceTicks = 0;
     private boolean computing = false;
     private long computeStartMs = 0;
     private volatile int progressNodes = 0;
@@ -201,10 +202,15 @@ public class CraftTreeScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
 
+        // 進行中のバックグラウンド計算結果を破棄（ユーザーの切替が古い結果で上書きされるのを防ぐ）
+        recomputeSeq++;
+
         UnifiedStockSnapshot snapshot = new UnifiedStockSnapshot();
         snapshot.addProvider(new PlayerInventoryStock(mc.player));
-        snapshot.addProvider(new RefinedStorageStock());
-        snapshot.addProvider(new Ae2Stock());
+        snapshot.addProvider(com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.of(
+                "refinedstorage", com.kumanchu.crafttreeplanner.integration.refinedstorage.RefinedStorageStock.captureEntries()));
+        snapshot.addProvider(com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.of(
+                "ae2", com.kumanchu.crafttreeplanner.integration.ae2.Ae2Stock.captureEntries()));
 
         int idx = Math.max(0, Math.min(node.alternativeRecipes.size() - 1, index));
         new RecipeResolver().switchRecipe(node, idx, snapshot, mc.level, slottedWorkstation);
@@ -303,11 +309,15 @@ public class CraftTreeScreen extends Screen {
     /** JEI/REIなどの相互作用用に、現在マウスホバーしているアイテムを取得 */
     @Nullable
     public ItemStack getHoveredItemStack() {
-        if (stationPopupNode != null && stationPopupHover >= 0
-                && stationPopupHover < stationPopupNode.alternativeRecipes.size()) {
-            PlannedRecipe alt = stationPopupNode.alternativeRecipes.get(stationPopupHover);
-            if (alt.getStation() != null && !alt.getStation().getIcon().isEmpty()) {
-                return alt.getStation().getIcon();
+        if (stationPopupNode != null && stationPopupHover >= 0 && stationPopupStage != 0) {
+            List<Integer> group = (stationPopupGroup >= 0 && stationPopupGroup < stationPopupGroups.size())
+                    ? stationPopupGroups.get(stationPopupGroup) : null;
+            if (group != null && stationPopupHover < group.size()) {
+                int globalIdx = group.get(stationPopupHover);
+                PlannedRecipe alt = stationPopupNode.alternativeRecipes.get(globalIdx);
+                if (alt.getStation() != null && !alt.getStation().getIcon().isEmpty()) {
+                    return alt.getStation().getIcon();
+                }
             }
         }
         if (isHoveringWorkstationSlot && !slottedWorkstation.isEmpty()) {
@@ -355,6 +365,10 @@ public class CraftTreeScreen extends Screen {
         if (outputSlotSparkleTicks > 0) {
             outputSlotSparkleTicks--;
         }
+        // 数量入力のデバウンストレイリング再計算（キーストローク毎の重い再探索を防ぐ）
+        if (debounceTicks > 0 && --debounceTicks == 0) {
+            recompute();
+        }
     }
 
     private void changeQuantity(long newQty) {
@@ -370,11 +384,12 @@ public class CraftTreeScreen extends Screen {
         }
     }
 
+    /** 数量入力欄のライブ更新（再計算はtickのデバウンスでまとめて実施） */
     private void setQuantityDirect(long newQty) {
         long clamped = Math.max(1, Math.min(99999, newQty));
         if (this.quantity != clamped) {
             this.quantity = clamped;
-            recompute();
+            debounceTicks = 4;
         }
     }
 
@@ -422,11 +437,14 @@ public class CraftTreeScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || targetItem.isEmpty()) return;
 
-        // 在庫スナップショットの構築だけメインスレッドで行い、ツリー計算はワーカースレッドへ
+        // 在庫はメインスレッドで不変スナップショットとして取り込む
+        // （バックグラウンド計算がRS/AE2のライブデータを直接触らないようにする）
         UnifiedStockSnapshot snapshot = new UnifiedStockSnapshot();
         snapshot.addProvider(new PlayerInventoryStock(mc.player));
-        snapshot.addProvider(new RefinedStorageStock());
-        snapshot.addProvider(new Ae2Stock());
+        snapshot.addProvider(com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.of(
+                "refinedstorage", com.kumanchu.crafttreeplanner.integration.refinedstorage.RefinedStorageStock.captureEntries()));
+        snapshot.addProvider(com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.of(
+                "ae2", com.kumanchu.crafttreeplanner.integration.ae2.Ae2Stock.captureEntries()));
 
         final int seq = ++recomputeSeq;
         final net.minecraft.world.level.Level level = mc.level;
@@ -1433,9 +1451,10 @@ public class CraftTreeScreen extends Screen {
             }
         }
 
-        // ツリー行クリック処理（ズーム＆スクロール座標変換対応）
-        if (mouseX >= contentX && mouseX <= contentX + contentW - 10 && mouseY >= contentY && mouseY <= contentY + contentH) {
-            double localMouseX = contentX + (mouseX - contentX) / zoomScale;
+        // ツリー行クリック処理（ズーム＆スクロール座標変換対応。判定はローカル座標で描画側と一致させる）
+        double gateMouseX = contentX + (mouseX - contentX) / zoomScale;
+        if (gateMouseX >= contentX && gateMouseX <= contentX + contentW - 10 && mouseY >= contentY && mouseY <= contentY + contentH) {
+            double localMouseX = gateMouseX;
             double localMouseY = contentY + (mouseY - contentY) / zoomScale;
             double virtualScrollOffset = scrollOffset / zoomScale;
             int treeBaseX = contentX + 6;
