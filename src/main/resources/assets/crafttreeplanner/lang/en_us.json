@@ -18,6 +18,7 @@
   "gui.crafttreeplanner.limit.2": "Limits: Large",
   "gui.crafttreeplanner.limit.3": "Limits: Huge",
   "gui.crafttreeplanner.popup.back": "← Back",
+  "gui.crafttreeplanner.popup.no_exec": " ✘ not directly craftable",
 
   "gui.crafttreeplanner.badge.missing": "Missing %s",
   "gui.crafttreeplanner.badge.craft_with_stock": "Craft %s (stock %s)",

@@ -711,9 +711,11 @@ public class RecipeResolver {
     ) {
         int score = 0;
         // 0. サーバー側で実行可能なレシピ（RecipeHolder持ち）を優先。
-        // JEIのみに存在する合成IDレシピは直接作成できずロールバックになるため、実体がある方を先に選ぶ
+        // JEIの取引・クエスト・ドロップ等のラッパーレシピはサーバーに実体がなく直接作成不可のため、大きく減点する
         if (recipe.getRecipeHolder() != null) {
             score += 80;
+        } else {
+            score -= 600;
         }
         // 1a. プレイヤーが直接実行できない情報カテゴリ（村人の取引・クエスト・ドロップ等）は大きく減点
         if (demoteInfoCategories()) {

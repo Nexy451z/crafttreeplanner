@@ -18,6 +18,7 @@
   "gui.crafttreeplanner.limit.2": "上限:大規模",
   "gui.crafttreeplanner.limit.3": "上限:超大",
   "gui.crafttreeplanner.popup.back": "← 戻る",
+  "gui.crafttreeplanner.popup.no_exec": " ✘ 直接作成不可",
 
   "gui.crafttreeplanner.badge.missing": "不足 %s",
   "gui.crafttreeplanner.badge.craft_with_stock": "作成 %s (在庫 %s)",

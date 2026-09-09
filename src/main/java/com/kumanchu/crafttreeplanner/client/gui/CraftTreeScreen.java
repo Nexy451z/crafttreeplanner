@@ -1194,16 +1194,20 @@ public class CraftTreeScreen extends Screen {
                 int globalIdx = group.get(rowIdx);
                 PlannedRecipe alt = stationPopupNode.alternativeRecipes.get(globalIdx);
                 boolean isCur = (globalIdx == stationPopupNode.selectedRecipeIndex);
+                boolean notExecutable = (alt.getRecipeHolder() == null);
                 String stName = alt.getStation().getDisplayName().getString();
                 String catName = alt.getCategoryTitle().getString();
                 String label = (isCur ? "✔ " : "  ") + stName
+                        + (notExecutable ? tr("gui.crafttreeplanner.popup.no_exec") : "")
                         + (catName.equals(stName) ? "" : " (" + catName + ")");
                 int maxLabelW = iconArea - 12;
                 if (font.width(label) > maxLabelW) {
                     label = font.plainSubstrByWidth(label, maxLabelW - 6) + "…";
                 }
-                g.drawString(font, label, px + 5, rowY + 4,
-                        isCur ? 0xFFA6E3A1 : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4), true);
+                int labelColor = isCur ? 0xFFA6E3A1
+                        : notExecutable ? 0xFF6C7086
+                        : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4);
+                g.drawString(font, label, px + 5, rowY + 4, labelColor, true);
 
                 // 材料プレビューアイコン（先頭3種）で候補を識別しやすく
                 List<ItemStack> previews = new ArrayList<>(3);
