@@ -9,6 +9,8 @@ import com.refinedmods.refinedstorage.api.storage.Storage;
 import com.refinedmods.refinedstorage.common.api.grid.Grid;
 import com.refinedmods.refinedstorage.common.api.storage.PlayerActor;
 import com.refinedmods.refinedstorage.common.grid.AbstractGridContainerMenu;
+import com.refinedmods.refinedstorage.common.grid.AbstractCraftingGridContainerMenu;
+import com.refinedmods.refinedstorage.common.grid.CraftingGrid;
 import com.refinedmods.refinedstorage.common.support.resource.ItemResource;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -43,6 +45,31 @@ public class RefinedStorageServerHelper {
             return grid instanceof Grid g ? g : null;
         } catch (Throwable t) {
             NexCraftTree.LOGGER.debug("[NexCraftTree] failed to access RS grid field: {}", t.toString());
+            return null;
+        }
+    }
+
+    /** プレイヤーが開いているRSクラフトグリッドのネットワークストレージを取得する */
+    public static com.refinedmods.refinedstorage.api.storage.Storage getGridStorage(ServerPlayer player) {
+        if (!isRsContainerOpen(player)) return null;
+        try {
+            AbstractGridContainerMenu menu = (AbstractGridContainerMenu) player.containerMenu;
+            Grid grid = getGrid(menu);
+            return grid != null ? grid.getItemStorage() : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** プレイヤーが開いているRSクラフトグリッド（マトリクス・結果スロット管理）を取得する */
+    public static CraftingGrid getCraftingGrid(AbstractCraftingGridContainerMenu menu) {
+        try {
+            Field craftingGridField = AbstractCraftingGridContainerMenu.class
+                    .getDeclaredField("craftingGrid");
+            craftingGridField.setAccessible(true);
+            Object craftingGrid = craftingGridField.get(menu);
+            return craftingGrid instanceof CraftingGrid g ? g : null;
+        } catch (Throwable t) {
             return null;
         }
     }
