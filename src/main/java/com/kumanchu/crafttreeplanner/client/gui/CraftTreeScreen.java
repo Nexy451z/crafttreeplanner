@@ -1001,8 +1001,9 @@ public class CraftTreeScreen extends Screen {
             }
         }
 
-        g.fill(px, py, px + panelW, py + panelH, 0xF81E1E2E);
+        g.fill(px, py, px + panelW, py + panelH, 0xFF181825);
         drawBorder(g, px, py, panelW, panelH, 0xFF89B4FA);
+        drawBorder(g, px + 1, py + 1, panelW - 2, panelH - 2, 0xFF313244);
 
         g.enableScissor(px + 1, py + 1, px + panelW - 1, py + panelH - 1);
         int iconArea = POPUP_WIDTH - 54;

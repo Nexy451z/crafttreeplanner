@@ -66,20 +66,8 @@ public class RecipeResolver {
             if (target == null || target.isEmpty() || want <= 0) {
                 return node;
             }
-            if (depth > MAX_DEPTH || nodeCount > MAX_NODES || System.currentTimeMillis() > deadline) {
-                node.missingAmount = want;
-                node.cutByLimit = true;
-                return node;
-            }
-            nodeCount++;
 
             ResourceLocation key = VirtualStockTracker.keyOf(target);
-            if (path.contains(key)) {
-                // 循環参照の打ち切り
-                node.missingAmount = want;
-                node.cutByCycle = true;
-                return node;
-            }
 
             long deficit;
             if (depth == 0) {
@@ -97,7 +85,8 @@ public class RecipeResolver {
                 }
                 deficit = want;
             } else {
-                // 子ノード: 在庫引き当て（手持ち + RS + AE2 の合算）
+                // 子ノード: 在庫引き当て（手持ち + RS + AE2 の合算）。
+                // 在庫充当は上限チェックよりも必ず先に行う（上限打ち切りでも所持分は不足扱いにしない）
                 long totalStock = 0;
                 try {
                     totalStock = stock.getTotal(target);
@@ -121,6 +110,20 @@ public class RecipeResolver {
                 } catch (Throwable ignored) {
                 }
             }
+
+            // 在庫で賄えなかった分だけを対象に、循環・上限チェックを行う
+            if (path.contains(key)) {
+                // 循環参照の打ち切り
+                node.missingAmount = deficit;
+                node.cutByCycle = true;
+                return node;
+            }
+            if (depth > MAX_DEPTH || nodeCount > MAX_NODES || System.currentTimeMillis() > deadline) {
+                node.missingAmount = deficit;
+                node.cutByLimit = true;
+                return node;
+            }
+            nodeCount++;
 
             // 全加工カテゴリからのレシピ候補探索（キャッシュ経由）
             List<PlannedRecipe> candidates;
@@ -167,7 +170,7 @@ public class RecipeResolver {
             return node;
         } catch (Throwable t) {
             CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] node resolve failed, treated as missing", t);
-            node.missingAmount = want;
+            node.missingAmount = Math.max(0, want - node.storedAmount);
             return node;
         }
     }
@@ -668,6 +671,13 @@ public class RecipeResolver {
         // JEIのみに存在する合成IDレシピは直接作成できずロールバックになるため、実体がある方を先に選ぶ
         if (recipe.getRecipeHolder() != null) {
             score += 80;
+        }
+        // 1a. プレイヤーが直接実行できない情報カテゴリ（村人の取引・クエスト・ドロップ等）は大きく減点
+        String uid = recipe.getStation().getCategoryUid() == null ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
+        if (uid.contains("trade") || uid.contains("villag") || uid.contains("wander") || uid.contains("merchant")
+                || uid.contains("quest") || uid.contains("loot") || uid.contains("drop")
+                || uid.contains("gift") || uid.contains("barter") || uid.contains("reward")) {
+            score -= 600;
         }
         // 1. アクティブスロットにセットされた設備と一致する場合: +1000
         if (activeWorkstation != null && !activeWorkstation.isEmpty() && recipe.getStation().matches(activeWorkstation)) {
