@@ -15,6 +15,7 @@ import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -566,7 +567,61 @@ public class RecipeResolver {
         }
 
         // ソートは設備・在庫依存のためキャッシュ可能なこの段階では行わない（getOrFindCandidateRecipesで実施）
+        dedupeCandidates(list);
         return list;
+    }
+
+    /**
+     * 同一内容のレシピ候補を統合する（金床リペア等、カテゴリ内で材料・出力が同一のバリエーションが大量に出る問題の抑制）。
+     * 同一判定: カテゴリ + 出力アイテム + 出力数 + 材料候補の集合
+     */
+    private static void dedupeCandidates(List<PlannedRecipe> list) {
+        if (list.size() <= 1) return;
+        Map<String, Integer> seen = new HashMap<>();
+        List<PlannedRecipe> result = new ArrayList<>(list.size());
+        for (PlannedRecipe r : list) {
+            String sig = buildSignature(r);
+            Integer prev = seen.get(sig);
+            if (prev != null) {
+                PlannedRecipe kept = result.get(prev);
+                if (r.getRecipeHolder() != null && kept.getRecipeHolder() == null) {
+                    // 実RecipeHolderを持つ方を優先（サーバー側実行で byKey が必要なため）
+                    result.set(prev, r);
+                }
+                continue;
+            }
+            seen.put(sig, result.size());
+            result.add(r);
+        }
+        list.clear();
+        list.addAll(result);
+    }
+
+    private static String buildSignature(PlannedRecipe r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(r.getStation().getCategoryUid()).append('|');
+        try {
+            sb.append(BuiltInRegistries.ITEM.getKey(r.getOutput().getItem())).append('|');
+        } catch (Throwable t) {
+            sb.append(r.getOutput().getItem()).append('|');
+        }
+        sb.append(r.getOutputCount()).append('|');
+        for (Ingredient ing : r.getIngredients()) {
+            try {
+                ItemStack[] options = ing.getItems();
+                List<String> ids = new ArrayList<>(options.length);
+                for (ItemStack opt : options) {
+                    if (opt != null && !opt.isEmpty()) {
+                        ids.add(BuiltInRegistries.ITEM.getKey(opt.getItem()).toString());
+                    }
+                }
+                Collections.sort(ids);
+                sb.append(ids).append(';');
+            } catch (Throwable t) {
+                sb.append("?;");
+            }
+        }
+        return sb.toString();
     }
 
     private static ProcessingStation determineStationForVanilla(RecipeHolder<?> h) {
