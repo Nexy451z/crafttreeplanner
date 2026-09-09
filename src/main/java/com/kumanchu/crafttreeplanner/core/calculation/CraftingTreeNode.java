@@ -21,8 +21,10 @@ public class CraftingTreeNode {
     public long missingAmount;
     /** RSパターン or AE2パターンで自動発注できるか */
     public boolean autocraftable;
-    /** 循環参照などで打ち切られたか */
+    /** 循環参照で打ち切られたか */
     public boolean cutByCycle;
+    /** 探索上限（深度・ノード数・時間切れ）で打ち切られたか */
+    public boolean cutByLimit;
     public RecipeHolder<?> recipe;
     public ProcessingStation station = ProcessingStation.CRAFTING_TABLE;
     public final List<PlannedRecipe> alternativeRecipes = new ArrayList<>();

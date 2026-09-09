@@ -31,7 +31,7 @@ public class ProcessingStation {
 
     public ProcessingStation(ItemStack icon, Component displayName, String categoryUid, boolean isCraftingTable) {
         this.icon = (icon != null && !icon.isEmpty()) ? icon.copy() : new ItemStack(Items.CRAFTING_TABLE);
-        this.displayName = displayName != null ? displayName : Component.literal("作業台");
+        this.displayName = displayName != null ? displayName : Component.translatable("gui.crafttreeplanner.station_default");
         this.categoryUid = categoryUid != null ? categoryUid : "minecraft:crafting";
         this.isCraftingTable = isCraftingTable;
     }

@@ -58,7 +58,7 @@ public class SequentialCraftingExecutor {
 
         // 1. 不足素材がある場合はクラフト不可
         if (hasMissing(node)) {
-            mc.gui.getChat().addMessage(Component.literal("§c[CraftTree] 不足素材があるため一括作成できません。素材を揃えてください。"));
+            mc.gui.getChat().addMessage(Component.translatable("msg.crafttreeplanner.seq.missing"));
             return;
         }
 
@@ -66,7 +66,7 @@ public class SequentialCraftingExecutor {
         List<CraftStep> steps = new ArrayList<>();
         collectSteps(node, steps);
         if (steps.isEmpty()) {
-            mc.gui.getChat().addMessage(Component.literal("§e[CraftTree] 作成が必要なクラフト工程がありません（すべて在庫にあります）"));
+            mc.gui.getChat().addMessage(Component.translatable("msg.crafttreeplanner.seq.no_steps"));
             return;
         }
 
@@ -76,7 +76,7 @@ public class SequentialCraftingExecutor {
         }
         AbstractContainerMenu menu = mc.player.containerMenu;
         if (menu == null || !isCraftingContainer(menu)) {
-            mc.gui.getChat().addMessage(Component.literal("§c[CraftTree] 作業台またはRSクラフトグリッドを開いてから[作成]を押してください"));
+            mc.gui.getChat().addMessage(Component.translatable("msg.crafttreeplanner.seq.need_container"));
             return;
         }
 
@@ -92,7 +92,7 @@ public class SequentialCraftingExecutor {
         state = State.TRANSFER_RECIPE;
         ticksWaiting = 1;
 
-        mc.gui.getChat().addMessage(Component.literal("§a[CraftTree] 自動クラフトを開始します（全 " + totalSteps + " 工程）..."));
+        mc.gui.getChat().addMessage(Component.translatable("msg.crafttreeplanner.seq.started", totalSteps));
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
@@ -100,7 +100,7 @@ public class SequentialCraftingExecutor {
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.player.containerMenu == null) {
-            cancel("画面が閉じられたためクラフトを中断しました");
+            cancel(Component.translatable("msg.crafttreeplanner.seq.cancel_closed"));
             return;
         }
 
@@ -121,7 +121,7 @@ public class SequentialCraftingExecutor {
                 clearCarriedItem(menu, mc);
                 int currentStepIdx = totalSteps - queue.size() + 1;
                 String itemName = current.target.getHoverName().getString();
-                mc.gui.setOverlayMessage(Component.literal("§e[CraftTree] クラフト中 (" + currentStepIdx + "/" + totalSteps + "): " + itemName), false);
+                mc.gui.setOverlayMessage(Component.translatable("msg.crafttreeplanner.seq.progress", currentStepIdx, totalSteps, itemName), false);
 
                 boolean transferred = false;
                 // 1) Refined Storage Crafting Grid
@@ -204,7 +204,7 @@ public class SequentialCraftingExecutor {
                     state = State.WAIT_RESULT_SYNC;
                     ticksWaiting = 2; // 2 tick（完成品受領待ち）
                 } else {
-                    cancel("クラフト素材の配置が完了しませんでした（素材が不足しているか、グリッドへの転送が完了していません）");
+                    cancel(Component.translatable("msg.crafttreeplanner.seq.cancel_transfer"));
                 }
             }
             case WAIT_RESULT_SYNC -> {
@@ -216,7 +216,7 @@ public class SequentialCraftingExecutor {
                     queue.poll();
                     if (queue.isEmpty()) {
                         state = State.IDLE;
-                        mc.gui.getChat().addMessage(Component.literal("§a✔ [CraftTree] 一括クラフト完了！ " + finalTargetName + " を作成しました！"));
+                        mc.gui.getChat().addMessage(Component.translatable("msg.crafttreeplanner.seq.done", finalTargetName));
                         try {
                             mc.player.playSound(SoundEvents.PLAYER_LEVELUP, 0.8f, 1.2f);
                         } catch (Throwable ignored) {
@@ -324,7 +324,7 @@ public class SequentialCraftingExecutor {
         return matrixSlots;
     }
 
-    private static void cancel(String reason) {
+    private static void cancel(Component reason) {
         state = State.IDLE;
         queue.clear();
         Minecraft mc = Minecraft.getInstance();
@@ -332,7 +332,7 @@ public class SequentialCraftingExecutor {
             clearCarriedItem(mc.player.containerMenu, mc);
         }
         if (mc.gui != null && mc.gui.getChat() != null) {
-            mc.gui.getChat().addMessage(Component.literal("§c[CraftTree] " + reason));
+            mc.gui.getChat().addMessage(Component.translatable("msg.crafttreeplanner.seq.cancel_prefix", reason.getString()));
         }
     }
 

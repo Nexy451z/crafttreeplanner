@@ -26,6 +26,7 @@ import net.minecraft.world.level.Level;
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * レシピツリー再帰探索エンジン。
@@ -35,10 +36,12 @@ import java.util.*;
 public class RecipeResolver {
     private static final int MAX_DEPTH = 16;
     private static final int MAX_NODES = 250;
+    private static final long LOOKUP_TIMEOUT_MS = 300;
     private int nodeCount = 0;
     private long deadline = 0;
     private final Map<net.minecraft.world.item.Item, Long> consumed = new HashMap<>();
-    private final Map<net.minecraft.world.item.Item, List<PlannedRecipe>> recipeCache = new HashMap<>();
+    /** セッション共有のレシピ候補キャッシュ（未ソート・レシピ再読込時にinvalidateCachesで破棄） */
+    private static final Map<net.minecraft.world.item.Item, List<PlannedRecipe>> candidateCache = new ConcurrentHashMap<>();
 
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level) {
         return resolve(target, wantCount, stock, level, null);
@@ -47,8 +50,7 @@ public class RecipeResolver {
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level, @Nullable ItemStack activeWorkstation) {
         nodeCount = 0;
         consumed.clear();
-        recipeCache.clear();
-        deadline = System.currentTimeMillis() + 300; // 最大300msで安全に打ち切り
+        deadline = System.currentTimeMillis() + LOOKUP_TIMEOUT_MS; // 最大300msで安全に打ち切り
         VirtualStockTracker tracker = new VirtualStockTracker();
         Deque<ResourceLocation> path = new ArrayDeque<>();
         return resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation);
@@ -65,7 +67,7 @@ public class RecipeResolver {
             }
             if (depth > MAX_DEPTH || nodeCount > MAX_NODES || System.currentTimeMillis() > deadline) {
                 node.missingAmount = want;
-                node.cutByCycle = true;
+                node.cutByLimit = true;
                 return node;
             }
             nodeCount++;
@@ -188,8 +190,8 @@ public class RecipeResolver {
         // 子ノードを新しいレシピの材料で再展開
         node.children.clear();
         nodeCount = 0;
-        recipeCache.clear();
-        deadline = System.currentTimeMillis() + 300;
+        consumed.clear();
+        deadline = System.currentTimeMillis() + LOOKUP_TIMEOUT_MS;
         VirtualStockTracker tracker = new VirtualStockTracker();
         Deque<ResourceLocation> path = new ArrayDeque<>();
         ResourceLocation key = VirtualStockTracker.keyOf(node.item);
@@ -311,7 +313,11 @@ public class RecipeResolver {
         return list;
     }
 
-    public List<PlannedRecipe> getOrFindCandidateRecipes(
+    /**
+     * レシピ候補の取得。セッション共有キャッシュにヒットすればJEI/バニラ問い合わせをスキップする。
+     * キャッシュは未ソートの生候補を保持し、ソートは現在の設備・在庫で毎回行う。
+     */
+    private List<PlannedRecipe> getOrFindCandidateRecipes(
             ItemStack target,
             Level level,
             @Nullable ItemStack activeWorkstation,
@@ -319,13 +325,23 @@ public class RecipeResolver {
     ) {
         if (target == null || target.isEmpty()) return Collections.emptyList();
         net.minecraft.world.item.Item item = target.getItem();
-        List<PlannedRecipe> cached = recipeCache.get(item);
-        if (cached != null) {
-            return cached;
+        List<PlannedRecipe> raw = candidateCache.get(item);
+        if (raw == null) {
+            // 期限切れ後は新しい重い探索を開始しない（ゲームフリーズ防止の安全弁）
+            if (System.currentTimeMillis() > deadline) return Collections.emptyList();
+            raw = findAllCandidateRecipes(target, level, activeWorkstation, stock, deadline);
+            candidateCache.put(item, raw);
         }
-        List<PlannedRecipe> list = findAllCandidateRecipes(target, level, activeWorkstation, stock);
-        recipeCache.put(item, list);
-        return list;
+        List<PlannedRecipe> sorted = new ArrayList<>(raw);
+        sortCandidates(sorted, target, activeWorkstation, stock);
+        return sorted;
+    }
+
+    /** レシピ再読込（データパック更新・サーバー同期）時に全キャッシュを破棄する */
+    public static void invalidateCaches() {
+        candidateCache.clear();
+        vanillaRecipeIndex = null;
+        lastRecipeManager = null;
     }
 
     private static volatile Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> vanillaRecipeIndex = null;
@@ -369,19 +385,20 @@ public class RecipeResolver {
 
     /**
      * 出力アイテムを作成可能なすべてのレシピ候補（作業台、かまど、合金製錬機、冶金注入機等）を探索して返す
+     * @param deadline この時刻を過ぎたら残りカテゴリ・レシピの探索を打ち切る（結果は部分的になり得る）
      */
     public static List<PlannedRecipe> findAllCandidateRecipes(
             ItemStack target,
             Level level,
             @Nullable ItemStack activeWorkstation,
-            @Nullable UnifiedStockSnapshot stock
+            @Nullable UnifiedStockSnapshot stock,
+            long deadline
     ) {
         if (target == null || target.isEmpty()) return Collections.emptyList();
         List<PlannedRecipe> list = new ArrayList<>();
         Set<ResourceLocation> seenRecipeIds = new HashSet<>();
 
         // 1. JEI からの全加工カテゴリ探索
-        boolean jeiFound = false;
         try {
             IJeiRuntime runtime = JeiHover.JeiRuntimeHolder.getRuntime();
             if (runtime != null) {
@@ -398,6 +415,7 @@ public class RecipeResolver {
                         .toList();
 
                 for (IRecipeCategory<?> cat : categories) {
+                    if (System.currentTimeMillis() > deadline) break; // カテゴリ間でも期限チェック（プラグイン遅延対策）
                     RecipeType<?> recipeType = cat.getRecipeType();
                     String catId = recipeType.getUid().toString();
                     String catPath = recipeType.getUid().getPath().toLowerCase(Locale.ROOT);
@@ -452,6 +470,7 @@ public class RecipeResolver {
                     }
 
                     for (Object r : recipes) {
+                        if (System.currentTimeMillis() > deadline) break;
                         RecipeHolder<?> holder = (r instanceof RecipeHolder<?> h) ? h : null;
                         ResourceLocation recipeId = holder != null ? holder.id() : null;
                         if (recipeId != null && seenRecipeIds.contains(recipeId)) {
@@ -511,16 +530,14 @@ public class RecipeResolver {
                         list.add(new PlannedRecipe(recipeId, holder, station, ingredients, outStack, outCount, cat.getTitle()));
                     }
                 }
-                if (!list.isEmpty()) {
-                    jeiFound = true;
-                }
             }
         } catch (Throwable t) {
             CraftTreePlanner.LOGGER.debug("[CraftTreePlanner] JEI candidate lookup error", t);
         }
 
-        // 2. Minecraft RecipeManager からの探索（JEIで見つからなかった場合のみ、かつインデックス経由でO(1)探索）
-        if (!jeiFound && level != null) {
+        // 2. Minecraft RecipeManager からの探索（インデックス経由でO(1)。
+        // JEIが見つけていても常にマージする: JEIは非表示設定や未登録レシピを漏らすことがあるため）
+        if (level != null) {
             try {
                 ensureVanillaIndex(level);
                 List<RecipeHolder<?>> matched = getVanillaRecipesFor(target.getItem());
@@ -548,8 +565,7 @@ public class RecipeResolver {
             }
         }
 
-        // 候補の優先度ソート
-        sortCandidates(list, target, activeWorkstation, stock);
+        // ソートは設備・在庫依存のためキャッシュ可能なこの段階では行わない（getOrFindCandidateRecipesで実施）
         return list;
     }
 
@@ -669,7 +685,8 @@ public class RecipeResolver {
 
     /** 互換用：単一レシピ探索 */
     public static RecipeHolder<?> findRecipe(ItemStack target, Level level) {
-        List<PlannedRecipe> candidates = findAllCandidateRecipes(target, level, null, null);
+        List<PlannedRecipe> candidates = findAllCandidateRecipes(target, level, null, null, System.currentTimeMillis() + LOOKUP_TIMEOUT_MS);
+        sortCandidates(candidates, target, null, null);
         return candidates.isEmpty() ? null : candidates.get(0).getRecipeHolder();
     }
 

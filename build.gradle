@@ -26,7 +26,13 @@ sourceSets.main.resources {
 }
 
 repositories {
-    // Add here additional repositories if required by some of the dependencies below.
+    // JEI (and other mod maven artifacts)
+    maven {
+        url "https://maven.blamejared.com/"
+        content {
+            includeGroup "mezz.jei"
+        }
+    }
 }
 
 base {
@@ -104,7 +110,11 @@ dependencies {
     // For all intends and purposes: You can treat this dependency as if it is a normal library you would use.
     implementation "net.neoforged:neoforge:${neo_version}"
 
-    compileOnly files("C:/Users/haruk/AppData/Roaming/PrismLauncher/instances/Kougyou/.minecraft/mods/jei-1.21.1-neoforge-19.52.0.422.jar")
+    // JEI: compile against the API, optionally run it in the dev client for testing.
+    // The mod itself works fine without JEI installed (integration is optional at runtime).
+    compileOnly "mezz.jei:jei-1.21.1-common-api:${jei_version}"
+    compileOnly "mezz.jei:jei-1.21.1-neoforge-api:${jei_version}"
+    localRuntime "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
 
 
     // Example mod dependency using a mod jar from ./libs with a flat dir repository

@@ -105,7 +105,7 @@ public class DirectCraftingEngine {
 
         if (steps == null || steps.isEmpty()) {
             PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
-                    false, Component.literal("§c[CraftTree] クラフト手順がありません"), ItemStack.EMPTY, 0
+                    false, Component.translatable("msg.crafttreeplanner.no_steps"), ItemStack.EMPTY, 0
             ));
             return;
         }
@@ -122,7 +122,7 @@ public class DirectCraftingEngine {
                 if (!isStationAvailable(player, stationIcon, slottedWorkstation)) {
                     String stationName = stationIcon.getHoverName().getString();
                     rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                            "§c[CraftTree] 必要な設備 (" + stationName + ") を所持していません (作業台スロットまたは所持品に入れてください)");
+                            Component.translatable("msg.crafttreeplanner.station_missing", stationName));
                     return;
                 }
             }
@@ -138,7 +138,7 @@ public class DirectCraftingEngine {
             Optional<RecipeHolder<?>> recipeOpt = level.getRecipeManager().byKey(recipeId);
             if (recipeOpt.isEmpty()) {
                 rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        "§c[CraftTree] レシピが見つかりませんでした: " + recipeId);
+                        Component.translatable("msg.crafttreeplanner.recipe_not_found", recipeId));
                 return;
             }
 
@@ -163,7 +163,7 @@ public class DirectCraftingEngine {
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
                             if (extracted.isEmpty()) {
                                 rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                        "§c[CraftTree] 必要素材が見つかりませんでした (工程: " + recipeId + ")");
+                        Component.translatable("msg.crafttreeplanner.ingredient_missing", recipeId));
                                 return;
                             }
                             inputItems.set(i, extracted);
@@ -180,7 +180,7 @@ public class DirectCraftingEngine {
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
                             if (extracted.isEmpty()) {
                                 rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                        "§c[CraftTree] 必要素材が見つかりませんでした (工程: " + recipeId + ")");
+                        Component.translatable("msg.crafttreeplanner.ingredient_missing", recipeId));
                                 return;
                             }
                             inputItems.set(i, extracted);
@@ -191,7 +191,7 @@ public class DirectCraftingEngine {
                     assembled = craftingRecipe.assemble(craftingInput, level.registryAccess());
                     if (assembled.isEmpty()) {
                         rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                "§c[CraftTree] レシピの合成に失敗しました (工程: " + recipeId + ")");
+                                Component.translatable("msg.crafttreeplanner.assemble_failed", recipeId));
                         return;
                     }
 
@@ -212,7 +212,7 @@ public class DirectCraftingEngine {
                         ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
                         if (extracted.isEmpty()) {
                             rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                    "§c[CraftTree] 必要素材が見つかりませんでした (工程: " + recipeId + ")");
+                        Component.translatable("msg.crafttreeplanner.ingredient_missing", recipeId));
                             return;
                         }
                         inputItems.add(extracted);
@@ -247,7 +247,7 @@ public class DirectCraftingEngine {
 
                     if (assembled.isEmpty()) {
                         rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                "§c[CraftTree] レシピの加工に失敗しました (工程: " + recipeId + ")");
+                                Component.translatable("msg.crafttreeplanner.process_failed", recipeId));
                         return;
                     }
                 }
@@ -291,7 +291,7 @@ public class DirectCraftingEngine {
 
         PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
                 true,
-                Component.literal("§a✔ クラフト完了！ 完成品スロットから回収できます"),
+                Component.translatable("msg.crafttreeplanner.done"),
                 finalOutput,
                 finalOutput.getCount()
         ));
@@ -371,7 +371,7 @@ public class DirectCraftingEngine {
             List<ItemStack> extractedFromPlayer,
             List<ItemStack> extractedFromRs,
             List<ItemStack> intermediatePool,
-            String message
+            Component message
     ) {
         for (ItemStack stack : extractedFromPlayer) {
             if (!stack.isEmpty()) {
@@ -398,7 +398,7 @@ public class DirectCraftingEngine {
             }
         }
         PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
-                false, Component.literal(message), ItemStack.EMPTY, 0
+                false, message, ItemStack.EMPTY, 0
         ));
     }
 

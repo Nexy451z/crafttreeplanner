@@ -1,25 +1,75 @@
+# CraftTreePlanner
 
-Installation information
-=======
+A crafting tree planner mod for **Minecraft 1.21.1** with **NeoForge 21.1.x**.
+Hover over any item and open a full crafting tree (AE2-style): it shows what you already own, what you need to craft, and what you are missing — across your inventory, Refined Storage, and Applied Energistics 2. Then craft everything with one click.
 
-This template repository can be directly cloned to get you started with a new
-mod. Simply create a new repository cloned from this one, by following the
-instructions provided by [GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
+![Mod status: alpha](https://img.shields.io/badge/status-alpha-orange) ![Minecraft: 1.21.1](https://img.shields.io/badge/minecraft-1.21.1-green) ![NeoForge: 21.1.x](https://img.shields.io/badge/neoforge-21.1.x-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
 
-Once you have your clone, simply open the repository in the IDE of your choice. The usual recommendation for an IDE is either IntelliJ IDEA or Eclipse.
+## Features
 
-If at any point you are missing libraries in your IDE, or you've run into problems you can
-run `gradlew --refresh-dependencies` to refresh the local cache. `gradlew clean` to reset everything 
-{this does not affect your code} and then start the process again.
+- **Crafting tree GUI** — bottom-up recipe tree for the hovered/held item, including intermediate steps
+- **Stock-aware planning** — counts your inventory, Refined Storage grid contents, and AE2 ME storage as one shared stock pool; badges show `Stock / Craft / Missing` per node
+- **Multi-station support** — recipes are found via JEI for *all* machine types (furnace, blast furnace, smoker, stonecutter, smithing, and modded machines like alloy smelters); click the station box to switch between alternative methods
+- **Workstation slot** — pin a preferred machine; recipes from that station are prioritized in both planning and execution
+- **One-click direct crafting** — pulls ingredients straight from your inventory (and the open RS grid), crafts all intermediate steps on the server, and hands you the result; failed steps roll back everything
+- **Craft-all (sequential mode)** — automate the whole tree through a vanilla crafting table or the RS Crafting Grid
+- **Recipe viewer hooks** — left click / `R` opens recipes, right click / `U` opens usages (uses your JEI/REI keybinds)
+- **Cycle & runaway protection** — self-feeding recipes, compression-block "reverse crafting" loops, deep recursion and huge modpacks are all bounded (search budget, node cap, per-lookup timeout with an O(1) vanilla recipe index + session-wide candidate cache)
+- **Languages** — English and Japanese (`en_us` / `ja_jp`)
 
-Mapping Names:
-============
-By default, the MDK is configured to use the official mapping names from Mojang for methods and fields 
-in the Minecraft codebase. These names are covered by a specific license. All modders should be aware of this
-license. For the latest license text, refer to the mapping file itself, or the reference copy here:
-https://github.com/NeoForged/NeoForm/blob/main/Mojang.md
+## Usage
 
-Additional Resources: 
-==========
-Community Documentation: https://docs.neoforged.net/  
-NeoForged Discord: https://discord.neoforged.net/
+1. Hover an item in any inventory / terminal / recipe viewer (or hold it in your main hand) and press **C** (rebindable, `Open Crafting Tree`).
+2. Set the desired amount (input box, `+/-`, or `x1/x10/x64` presets). The tree recomputes instantly.
+3. Optional: set a **workstation** (bottom-left slot) to prefer a specific machine.
+4. Press **Create** (header) or **Craft All** (footer):
+   - **Create** = *direct craft*: ingredients are pulled from your inventory + the open RS grid, all steps run server-side, result appears in the **Result slot** (click to collect). Nothing is consumed if a step fails.
+   - **Craft All** = *sequential*: the executor drives an open crafting table / RS Crafting Grid step by step.
+5. Left-click an item icon to see its recipe in JEI/REI, right-click for usages.
+
+> **Note:** RS/AE2 stock is read from the *currently open* terminal screen. Open your RS grid or ME terminal while planning to include network storage.
+
+## Supported integrations (all optional at runtime)
+
+| Mod | What it adds |
+|-----|--------------|
+| JEI | Machine-agnostic recipe search, R/U keybinds, recipe/usage windows |
+| REI | Same hooks via reflection (works without JEI) |
+| Refined Storage 2 | Grid stock counts, ingredient extraction/crafting grid automation |
+| Applied Energistics 2 | ME terminal stock counts + "autocraftable" badge |
+
+No hard dependency: the mod runs fine with JEI/REI/RS/AE2 absent (fallback to the vanilla `RecipeManager`).
+
+## Building
+
+Requirements: **JDK 21**.
+
+```powershell
+./gradlew build
+```
+
+The mod jar is produced in `build/libs/`. 
+
+JEI is compiled against the official **API artifacts** published on [maven.blamejared.com](https://maven.blamejared.com/) — no local jar needed. Pin the version in `gradle.properties`:
+
+```properties
+jei_version=19.52.0.422
+```
+
+To test inside the dev client with JEI installed, the `localRuntime` dependency fetches the full JEI jar automatically (`./gradlew runClient`).
+
+## Install (players)
+
+1. Install [NeoForge](https://neoforged.net/) 21.1.235+ for Minecraft 1.21.1
+2. Drop the built jar (`crafttreeplanner-<version>.jar`) into your `mods` folder
+3. Optional: add JEI / Refined Storage / AE2 for the full experience
+
+## Roadmap / Known limitations
+
+- Server-side direct crafting trusts the step list sent by the client; server-side re-validation (recipe existence + output match) is planned
+- RS/AE2 stock only visible while the respective terminal screen is open
+- Alternative-recipe switching re-resolves only the affected subtree
+
+## License
+
+MIT — see `TEMPLATE_LICENSE.txt` inherited header handling in `neoforge.mods.toml` (`${mod_license}`).

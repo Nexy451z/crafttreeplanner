@@ -84,6 +84,10 @@ public class CraftTreeScreen extends Screen {
     private EditBox amountField;
     private boolean isUpdatingAmountField = false;
 
+    private static String tr(String key, Object... args) {
+        return Component.translatable(key, args).getString();
+    }
+
     private void changeZoom(int direction) {
         int curIdx = 3;
         float minDiff = Float.MAX_VALUE;
@@ -117,7 +121,7 @@ public class CraftTreeScreen extends Screen {
     private void toggleItemNames() {
         showItemNames = !showItemNames;
         if (nameToggleBtn != null) {
-            nameToggleBtn.setMessage(Component.literal(showItemNames ? "名前:ON" : "名前:OFF"));
+            nameToggleBtn.setMessage(Component.literal(showItemNames ? tr("gui.crafttreeplanner.button.names_on") : tr("gui.crafttreeplanner.button.names_off")));
         }
         updateMaxScroll();
     }
@@ -189,16 +193,16 @@ public class CraftTreeScreen extends Screen {
             this.outputSlotStack = resultStack.copy();
             if (!resultStack.isEmpty()) {
                 this.outputSlotSparkleTicks = 40;
-                this.statusFeedback = "✔ 作成完了！(クリックで回収)";
+                this.statusFeedback = tr("gui.crafttreeplanner.status.done_click_take");
                 this.statusFeedbackColor = 0xFFA6E3A1;
             } else {
                 this.outputSlotSparkleTicks = 0;
-                this.statusFeedback = "✔ インベントリへ回収しました";
+                this.statusFeedback = tr("gui.crafttreeplanner.status.done_collected");
                 this.statusFeedbackColor = 0xFFA6E3A1;
             }
             recompute();
         } else {
-            this.statusFeedback = (message != null && !message.getString().isEmpty()) ? message.getString() : "✘ 作成に失敗しました";
+            this.statusFeedback = (message != null && !message.getString().isEmpty()) ? message.getString() : tr("gui.crafttreeplanner.status.failed");
             this.statusFeedbackColor = 0xFFF38BA8;
             recompute();
         }
@@ -251,7 +255,7 @@ public class CraftTreeScreen extends Screen {
     }
 
     private void initAmountField(int x, int y, int w, int h) {
-        amountField = new EditBox(font, x, y, w, h, Component.literal("数量"));
+        amountField = new EditBox(font, x, y, w, h, Component.translatable("gui.crafttreeplanner.amount.label"));
         amountField.setMaxLength(5);
         amountField.setFilter(s -> s.matches("\\d*"));
         amountField.setValue(String.valueOf(quantity));
@@ -405,7 +409,7 @@ public class CraftTreeScreen extends Screen {
 
         // 1. アイテム名表示切り替えボタン (名前:ON / 名前:OFF)
         curRight -= 48;
-        nameToggleBtn = addRenderableWidget(Button.builder(Component.literal(showItemNames ? "名前:ON" : "名前:OFF"), b -> toggleItemNames())
+        nameToggleBtn = addRenderableWidget(Button.builder(Component.literal(showItemNames ? tr("gui.crafttreeplanner.button.names_on") : tr("gui.crafttreeplanner.button.names_off")), b -> toggleItemNames())
                 .bounds(curRight, btnY, 48, btnH).build());
 
         curRight -= 4; // 区切り
@@ -422,7 +426,7 @@ public class CraftTreeScreen extends Screen {
 
         // 3. ヘッダー作成ボタン
         curRight -= 38;
-        addRenderableWidget(Button.builder(Component.literal("作成"), b -> {
+        addRenderableWidget(Button.builder(Component.literal(tr("gui.crafttreeplanner.button.create")), b -> {
             if (root != null) executeCraft(root);
         }).bounds(curRight, btnY, 38, btnH).build());
 
@@ -453,12 +457,12 @@ public class CraftTreeScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("-"), b -> changeQuantity(quantity - 1)).bounds(curRight, btnY, 16, btnH).build());
 
         // フッターの一括作成ボタン
-        addRenderableWidget(Button.builder(Component.literal("一括作成"), b -> {
+        addRenderableWidget(Button.builder(Component.literal(tr("gui.crafttreeplanner.button.craft_all")), b -> {
             if (root != null) executeCraft(root);
         }).bounds(winX + winWidth - 124, winY + winHeight - 25, 58, 19).build());
 
         // 閉じるボタン
-        addRenderableWidget(Button.builder(Component.literal("閉じる"), b -> onClose())
+        addRenderableWidget(Button.builder(Component.literal(tr("gui.crafttreeplanner.button.close")), b -> onClose())
                 .bounds(winX + winWidth - 62, winY + winHeight - 25, 52, 19).build());
     }
 
@@ -622,27 +626,29 @@ public class CraftTreeScreen extends Screen {
                     badgeBg = 0x33F38BA8;
                     badgeBorder = 0x88F38BA8;
                     badgeFg = 0xFFF38BA8;
-                    badgeText = "不足 " + r.node.missingAmount;
+                    badgeText = tr("gui.crafttreeplanner.badge.missing", r.node.missingAmount);
                 } else if (r.node.toCraftAmount > 0) {
                     badgeBg = isBadgeHovered ? 0x66F9E2AF : 0x33F9E2AF;
                     badgeBorder = isBadgeHovered ? 0xFFF9E2AF : 0x88F9E2AF;
                     badgeFg = 0xFFF9E2AF;
                     if (r.node.storedAmount > 0) {
-                        badgeText = "作成 " + r.node.toCraftAmount + " (在庫 " + r.node.storedAmount + ")";
+                        badgeText = tr("gui.crafttreeplanner.badge.craft_with_stock", r.node.toCraftAmount, r.node.storedAmount);
                     } else {
-                        badgeText = r.node.autocraftable ? "自動 " + r.node.toCraftAmount : "作成 " + r.node.toCraftAmount;
+                        badgeText = r.node.autocraftable ? tr("gui.crafttreeplanner.badge.auto", r.node.toCraftAmount)
+                                : tr("gui.crafttreeplanner.badge.craft", r.node.toCraftAmount);
                     }
                 } else {
                     badgeBg = 0x33A6E3A1;
                     badgeBorder = 0x88A6E3A1;
                     badgeFg = 0xFFA6E3A1;
                     if (r.node.totalStockAmount > r.node.storedAmount) {
-                        badgeText = "在庫 " + r.node.storedAmount + "/" + r.node.totalStockAmount;
+                        badgeText = tr("gui.crafttreeplanner.badge.stock", r.node.storedAmount, r.node.totalStockAmount);
                     } else {
-                        badgeText = "在庫 " + r.node.storedAmount;
+                        badgeText = tr("gui.crafttreeplanner.badge.stock_short", r.node.storedAmount);
                     }
                 }
-                if (r.node.cutByCycle) badgeText += " (循環)";
+                if (r.node.cutByCycle) badgeText += " " + tr("gui.crafttreeplanner.suffix.cycle");
+                else if (r.node.cutByLimit) badgeText += " " + tr("gui.crafttreeplanner.suffix.limit");
 
                 int badgeY = rY + 4;
                 int badgeH = 14;
@@ -679,19 +685,19 @@ public class CraftTreeScreen extends Screen {
                     badgeBg = 0x44F38BA8;
                     badgeBorder = 0x88F38BA8;
                     badgeFg = 0xFFF38BA8;
-                    miniText = "欠" + r.node.missingAmount;
+                    miniText = tr("gui.crafttreeplanner.badge.mini_missing", r.node.missingAmount);
                 } else if (r.node.toCraftAmount > 0) {
                     statusColor = 0xFFF9E2AF;
                     badgeBg = isTileHovered ? 0x88F9E2AF : 0x44F9E2AF;
                     badgeBorder = isTileHovered ? 0xFFF9E2AF : 0x88F9E2AF;
                     badgeFg = 0xFFF9E2AF;
-                    miniText = "作" + r.node.toCraftAmount;
+                    miniText = tr("gui.crafttreeplanner.badge.mini_craft", r.node.toCraftAmount);
                 } else {
                     statusColor = 0xFFA6E3A1;
                     badgeBg = 0x44A6E3A1;
                     badgeBorder = 0x88A6E3A1;
                     badgeFg = 0xFFA6E3A1;
-                    miniText = "庫" + r.node.storedAmount;
+                    miniText = tr("gui.crafttreeplanner.badge.mini_stock", r.node.storedAmount);
                 }
 
                 // タイル背景とステータスボーダー
@@ -763,13 +769,15 @@ public class CraftTreeScreen extends Screen {
         drawBorder(g, wsSlotX, wsSlotY, wsSlotSize, wsSlotSize, wsBorderColor);
 
         // 設備アイコン描画
+        String wsLabel = tr("gui.crafttreeplanner.slot.workstation");
+        String outLabel = tr("gui.crafttreeplanner.slot.output");
         if (!slottedWorkstation.isEmpty()) {
             g.renderFakeItem(slottedWorkstation, wsSlotX + 3, wsSlotY + 3);
             g.renderItemDecorations(font, slottedWorkstation, wsSlotX + 3, wsSlotY + 3);
         } else {
-            g.drawCenteredString(font, "設", wsSlotX + 11, wsSlotY + 7, 0x44CDD6F4);
+            g.drawCenteredString(font, tr("gui.crafttreeplanner.slot.workstation_ph"), wsSlotX + 11, wsSlotY + 7, 0x44CDD6F4);
         }
-        g.drawString(font, "設備", wsSlotX - font.width("設備") - 4, footerTextY, 0xFFA6ADC8, true);
+        g.drawString(font, wsLabel, wsSlotX - font.width(wsLabel) - 4, footerTextY, 0xFFA6ADC8, true);
 
         // 完成品スロット背景と枠線
         g.fill(outSlotX, outSlotY, outSlotX + outSlotSize, outSlotY + outSlotSize, 0xFF11111B);
@@ -788,14 +796,14 @@ public class CraftTreeScreen extends Screen {
             g.renderFakeItem(outputSlotStack, outSlotX + 3, outSlotY + 3);
             g.renderItemDecorations(font, outputSlotStack, outSlotX + 3, outSlotY + 3, String.valueOf(outputSlotStack.getCount()));
         } else {
-            g.drawCenteredString(font, "出", outSlotX + 11, outSlotY + 7, 0x44CDD6F4);
+            g.drawCenteredString(font, tr("gui.crafttreeplanner.slot.output_ph"), outSlotX + 11, outSlotY + 7, 0x44CDD6F4);
         }
 
         // 完成品ラベル
-        g.drawString(font, "完成品", outSlotX - font.width("完成品") - 4, footerTextY, 0xFFA6ADC8, true);
+        g.drawString(font, outLabel, outSlotX - font.width(outLabel) - 4, footerTextY, 0xFFA6ADC8, true);
 
         // 左側ステータステキスト
-        int maxTextW = wsSlotX - font.width("設備") - 16 - (winX + 12);
+        int maxTextW = wsSlotX - font.width(wsLabel) - 16 - (winX + 12);
         if (statusFeedback != null && !statusFeedback.isEmpty()) {
             String txt = statusFeedback;
             if (font.width(txt) > maxTextW) {
@@ -803,9 +811,9 @@ public class CraftTreeScreen extends Screen {
             }
             g.drawString(font, txt, winX + 12, footerTextY, statusFeedbackColor, true);
         } else if (totalMissingCount == 0) {
-            g.drawString(font, "✔ 素材完備 - ワンクリック作成可能", winX + 12, footerTextY, 0xFFA6E3A1, true);
+            g.drawString(font, tr("gui.crafttreeplanner.status.ready"), winX + 12, footerTextY, 0xFFA6E3A1, true);
         } else {
-            String sumText = String.format("✘ 不足: %d種類 (%d個) | 工程: %d回",
+            String sumText = tr("gui.crafttreeplanner.status.missing_summary",
                     totalMissingKinds, totalMissingCount, totalCraftSteps);
             if (font.width(sumText) > maxTextW) {
                 sumText = font.plainSubstrByWidth(sumText, maxTextW - 6) + "…";
@@ -821,42 +829,42 @@ public class CraftTreeScreen extends Screen {
             List<Component> tooltip = new ArrayList<>();
             if (!slottedWorkstation.isEmpty()) {
                 tooltip.add(slottedWorkstation.getHoverName());
-                tooltip.add(Component.literal("§7優先設備: §b" + slottedWorkstation.getHoverName().getString()));
-                tooltip.add(Component.literal("§aこの設備での加工レシピを最優先で探索・実行します"));
-                tooltip.add(Component.literal("§6[左クリック: 解除 / 所持設備を循環切替]"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.priority", slottedWorkstation.getHoverName().getString()));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.desc"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.leftclick"));
                 String usageKey = RecipeViewerIntegration.getUsageKeyName();
-                tooltip.add(Component.literal("§8[右クリック / " + usageKey + ": 設備のレシピ表示]"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.usage", usageKey));
             } else {
-                tooltip.add(Component.literal("§b作業台・加工設備スロット"));
-                tooltip.add(Component.literal("§7作業台やかまど、MOD加工機（合金製錬機など）を設定できます。"));
-                tooltip.add(Component.literal("§8カーソルでアイテムを持ってクリック、またはクリックで所持設備を自動選択"));
-                tooltip.add(Component.literal("§8(未設定時は通常の作業台が優先されます)"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.empty.title"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.empty.desc"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.empty.click"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.workstation.empty.fallback"));
             }
             g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
         } else if (isHoveringOutputSlot) {
             List<Component> tooltip = new ArrayList<>();
             if (!outputSlotStack.isEmpty()) {
                 tooltip.add(outputSlotStack.getHoverName());
-                tooltip.add(Component.literal("§7数量: §a" + outputSlotStack.getCount() + "個"));
-                tooltip.add(Component.literal("§6[クリック: インベントリへ回収]"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.output.count", outputSlotStack.getCount()));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.output.take"));
                 String usageKey = RecipeViewerIntegration.getUsageKeyName();
-                tooltip.add(Component.literal("§8[右クリック / " + usageKey + ": 用途]"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.output.usage", usageKey));
             } else {
-                tooltip.add(Component.literal("§e完成品スロット"));
-                tooltip.add(Component.literal("§7クラフトした完成品がここに出現します。"));
-                tooltip.add(Component.literal("§8クリックでインベントリへ回収できます。"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.output.empty.title"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.output.empty.desc"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.output.empty.take"));
             }
             g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
         } else if (currentHoveredStationRow != null) {
             CraftingTreeNode node = currentHoveredStationRow.node;
             List<Component> tooltip = new ArrayList<>();
             ProcessingStation st = (node.station != null) ? node.station : ProcessingStation.CRAFTING_TABLE;
-            tooltip.add(Component.literal("§6加工設備: §f" + st.getDisplayName().getString()));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.station.title", st.getDisplayName().getString()));
             if (st.getCategoryUid() != null && !st.getCategoryUid().isEmpty()) {
-                tooltip.add(Component.literal("§8カテゴリ: " + st.getCategoryUid()));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.station.category", st.getCategoryUid()));
             }
             if (node.alternativeRecipes.size() > 1) {
-                tooltip.add(Component.literal("§b[クリック: 別の加工法に切替 (全" + node.alternativeRecipes.size() + "種)]"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.station.switch", node.alternativeRecipes.size()));
                 for (int ai = 0; ai < node.alternativeRecipes.size(); ai++) {
                     PlannedRecipe alt = node.alternativeRecipes.get(ai);
                     boolean isCur = (ai == node.selectedRecipeIndex);
@@ -864,57 +872,60 @@ public class CraftTreeScreen extends Screen {
                     tooltip.add(Component.literal(prefix + alt.getStation().getDisplayName().getString() + " (" + alt.getCategoryTitle().getString() + ")"));
                 }
             } else {
-                tooltip.add(Component.literal("§7このアイテムの加工設備です"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.station.single"));
             }
             String usageKey = RecipeViewerIntegration.getUsageKeyName();
-            tooltip.add(Component.literal("§8[右クリック / " + usageKey + ": 設備用途表示]"));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.station.usage", usageKey));
             g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
         } else if (currentHoveredRow != null) {
             List<Component> tooltip = new ArrayList<>();
             tooltip.add(currentHoveredRow.node.item.getHoverName());
-            tooltip.add(Component.literal("§7必要数: §f" + currentHoveredRow.node.requiredAmount + "個"));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.required", currentHoveredRow.node.requiredAmount));
             if (currentHoveredRow.node.storedAmount > 0) {
                 if (currentHoveredRow.node.totalStockAmount > currentHoveredRow.node.storedAmount) {
-                    tooltip.add(Component.literal("§7所持在庫: §a" + currentHoveredRow.node.totalStockAmount + "個 §8(今回充当: " + currentHoveredRow.node.storedAmount + "個)"));
+                    tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.stock_allocated",
+                            currentHoveredRow.node.totalStockAmount, currentHoveredRow.node.storedAmount));
                 } else {
-                    tooltip.add(Component.literal("§7所持在庫: §a" + currentHoveredRow.node.storedAmount + "個"));
+                    tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.stock", currentHoveredRow.node.storedAmount));
                 }
             } else if (currentHoveredRow.node.totalStockAmount > 0) {
-                tooltip.add(Component.literal("§7所持在庫: §a" + currentHoveredRow.node.totalStockAmount + "個"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.stock", currentHoveredRow.node.totalStockAmount));
             }
             if (currentHoveredRow.node.toCraftAmount > 0) {
-                tooltip.add(Component.literal("§7クラフト必要: §e" + currentHoveredRow.node.toCraftAmount + "個"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.tocraft", currentHoveredRow.node.toCraftAmount));
             }
             if (currentHoveredRow.node.missingAmount > 0) {
-                tooltip.add(Component.literal("§7不足数: §c" + currentHoveredRow.node.missingAmount + "個"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.missing", currentHoveredRow.node.missingAmount));
             }
             if (currentHoveredRow.node.autocraftable) {
-                tooltip.add(Component.literal("§b自動クラフト対応 (RS/AE2)"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.autocraft"));
             }
             if (currentHoveredRow.node.cutByCycle) {
-                tooltip.add(Component.literal("§6循環レシピ検知（打ち切り）"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.cycle"));
+            } else if (currentHoveredRow.node.cutByLimit) {
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.limit"));
             }
 
             if (currentHoveredRow.node.toCraftAmount > 0) {
-                tooltip.add(Component.literal("§6[バッジクリック: 作成 / レシピ転送]"));
+                tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.actions"));
             }
             String recipeKey = RecipeViewerIntegration.getRecipeKeyName();
             String usageKey = RecipeViewerIntegration.getUsageKeyName();
-            tooltip.add(Component.literal("§8[左クリック / " + recipeKey + ": レシピ] [右クリック / " + usageKey + ": 用途]"));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.keys", recipeKey, usageKey));
             g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
         } else if (amountField != null && mouseX >= amountField.getX() - 2 && mouseX <= amountField.getX() + amountField.getWidth() + 2
                 && mouseY >= amountField.getY() - 2 && mouseY <= amountField.getY() + amountField.getHeight() + 2) {
             List<Component> tooltip = new ArrayList<>();
-            tooltip.add(Component.literal("§e作成希望数: §f" + quantity + "個"));
-            tooltip.add(Component.literal("§7クリックして直接数値を入力できます。"));
-            tooltip.add(Component.literal("§8[マウスホイール: 増減] [Enter: 確定]"));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.amount.title", quantity));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.amount.desc"));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.amount.hints"));
             g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
         } else if (isHoveringTargetIcon && !targetItem.isEmpty()) {
             List<Component> tooltip = new ArrayList<>();
             tooltip.add(targetItem.getHoverName());
             String recipeKey = RecipeViewerIntegration.getRecipeKeyName();
             String usageKey = RecipeViewerIntegration.getUsageKeyName();
-            tooltip.add(Component.literal("§8[左クリック / " + recipeKey + ": レシピ] [右クリック / " + usageKey + ": 用途]"));
+            tooltip.add(Component.translatable("gui.crafttreeplanner.tt.row.keys", recipeKey, usageKey));
             g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
         }
     }
@@ -923,18 +934,18 @@ public class CraftTreeScreen extends Screen {
     public void executeCraft(CraftingTreeNode node) {
         if (node == null) return;
         if (node.missingAmount > 0) {
-            this.statusFeedback = "✘ 不足素材があるため作成できません";
+            this.statusFeedback = tr("gui.crafttreeplanner.status.cannot_missing");
             this.statusFeedbackColor = 0xFFF38BA8;
             return;
         }
         List<DirectCraftStep> steps = new ArrayList<>();
         collectDirectCraftSteps(node, steps);
         if (steps.isEmpty()) {
-            this.statusFeedback = "✔ 作成が必要な工程はありません（全て在庫済）";
+            this.statusFeedback = tr("gui.crafttreeplanner.status.no_steps");
             this.statusFeedbackColor = 0xFFF9E2AF;
             return;
         }
-        this.statusFeedback = "クラフト実行中...";
+        this.statusFeedback = tr("gui.crafttreeplanner.status.crafting");
         this.statusFeedbackColor = 0xFFF9E2AF;
         CraftTreeNetwork.sendDirectCraftRequest(node.item, (int) node.requiredAmount, steps, slottedWorkstation);
     }

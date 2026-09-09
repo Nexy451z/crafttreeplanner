@@ -2,6 +2,7 @@ package com.kumanchu.crafttreeplanner.client;
 
 import com.kumanchu.crafttreeplanner.CraftTreePlanner;
 import com.kumanchu.crafttreeplanner.client.gui.CraftTreeScreen;
+import com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver;
 import com.kumanchu.crafttreeplanner.integration.jei.JeiHover;
 import com.kumanchu.crafttreeplanner.integration.rei.ReiHover;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -13,6 +14,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.client.event.InputEvent;
+import net.neoforged.neoforge.client.event.RecipesUpdatedEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
@@ -40,8 +42,18 @@ public final class KeyInputHandler {
             NeoForge.EVENT_BUS.addListener(KeyInputHandler::onScreenKey);
             NeoForge.EVENT_BUS.addListener(KeyInputHandler::onScreenMouse);
             NeoForge.EVENT_BUS.addListener(KeyInputHandler::onKeyInput);
+            NeoForge.EVENT_BUS.addListener(KeyInputHandler::onRecipesUpdated);
         } catch (Throwable t) {
             CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] key handler register failed", t);
+        }
+    }
+
+    /** サーバーからレシピ同期・データパック再読込があったらレシピ探索キャッシュを破棄 */
+    private static void onRecipesUpdated(RecipesUpdatedEvent event) {
+        try {
+            RecipeResolver.invalidateCaches();
+        } catch (Throwable t) {
+            CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] cache invalidation failed", t);
         }
     }
 

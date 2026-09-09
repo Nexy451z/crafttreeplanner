@@ -40,7 +40,7 @@ public class PlannedRecipe {
         this.ingredients = ingredients != null ? ingredients : new ArrayList<>();
         this.output = (output != null && !output.isEmpty()) ? output.copy() : ItemStack.EMPTY;
         this.outputCount = Math.max(1, outputCount);
-        this.categoryTitle = categoryTitle != null ? categoryTitle : Component.literal("クラフト");
+        this.categoryTitle = categoryTitle != null ? categoryTitle : Component.translatable("gui.crafttreeplanner.category_default");
     }
 
     public ResourceLocation getId() {
