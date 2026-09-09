@@ -1,0 +1,53 @@
+package com.kumanchu.crafttreeplanner.core.stock;
+
+import com.kumanchu.crafttreeplanner.CraftTreePlanner;
+import com.kumanchu.crafttreeplanner.core.ItemMatchHelper;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+
+/**
+ * プレイヤー手持ち（0〜35スロット）在庫。
+ * 常に利用可能で、絶対にクラッシュさせない。
+ */
+public class PlayerInventoryStock implements IStockProvider {
+    private final Player player;
+
+    public PlayerInventoryStock(Player player) {
+        this.player = player;
+    }
+
+    @Override
+    public String getSourceName() {
+        return "player";
+    }
+
+    @Override
+    public long getAmount(ItemStack stack) {
+        try {
+            if (player == null || stack == null || stack.isEmpty()) return 0;
+            long total = 0;
+            for (ItemStack s : player.getInventory().items) {
+                try {
+                    if (!s.isEmpty() && ItemMatchHelper.isStockMatch(s, stack)) {
+                        total += s.getCount();
+                    }
+                } catch (Throwable t) {
+                    CraftTreePlanner.LOGGER.debug("[CraftTreePlanner] inv scan skip: {}", t.toString());
+                }
+            }
+            for (ItemStack s : player.getInventory().offhand) {
+                try {
+                    if (!s.isEmpty() && ItemMatchHelper.isStockMatch(s, stack)) {
+                        total += s.getCount();
+                    }
+                } catch (Throwable t) {
+                    CraftTreePlanner.LOGGER.debug("[CraftTreePlanner] offhand scan skip: {}", t.toString());
+                }
+            }
+            return total;
+        } catch (Throwable t) {
+            CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] PlayerInventoryStock failed", t);
+            return 0;
+        }
+    }
+}

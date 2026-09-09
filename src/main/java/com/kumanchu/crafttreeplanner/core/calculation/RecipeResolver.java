@@ -1,0 +1,693 @@
+package com.kumanchu.crafttreeplanner.core.calculation;
+
+import com.kumanchu.crafttreeplanner.CraftTreePlanner;
+import com.kumanchu.crafttreeplanner.core.ItemMatchHelper;
+import com.kumanchu.crafttreeplanner.core.stock.UnifiedStockSnapshot;
+import com.kumanchu.crafttreeplanner.integration.jei.JeiHover;
+import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.helpers.IJeiHelpers;
+import mezz.jei.api.ingredients.IIngredientSupplier;
+import mezz.jei.api.ingredients.ITypedIngredient;
+import mezz.jei.api.recipe.IFocus;
+import mezz.jei.api.recipe.IFocusFactory;
+import mezz.jei.api.recipe.IRecipeManager;
+import mezz.jei.api.recipe.RecipeIngredientRole;
+import mezz.jei.api.recipe.RecipeType;
+import mezz.jei.api.recipe.category.IRecipeCategory;
+import mezz.jei.api.runtime.IJeiRuntime;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.level.Level;
+
+import javax.annotation.Nullable;
+import java.lang.reflect.Field;
+import java.util.*;
+
+/**
+ * レシピツリー再帰探索エンジン。
+ * JEI / バニラRecipeManager の双方から作業台レシピに加え各種加工機械（かまど、合金製錬機、冶金注入機など）
+ * のレシピを網羅的に探索し、複数候補の切り替えや対応作業台の特定を行う。
+ */
+public class RecipeResolver {
+    private static final int MAX_DEPTH = 16;
+    private static final int MAX_NODES = 250;
+    private int nodeCount = 0;
+    private long deadline = 0;
+    private final Map<net.minecraft.world.item.Item, Long> consumed = new HashMap<>();
+    private final Map<net.minecraft.world.item.Item, List<PlannedRecipe>> recipeCache = new HashMap<>();
+
+    public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level) {
+        return resolve(target, wantCount, stock, level, null);
+    }
+
+    public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level, @Nullable ItemStack activeWorkstation) {
+        nodeCount = 0;
+        consumed.clear();
+        recipeCache.clear();
+        deadline = System.currentTimeMillis() + 300; // 最大300msで安全に打ち切り
+        VirtualStockTracker tracker = new VirtualStockTracker();
+        Deque<ResourceLocation> path = new ArrayDeque<>();
+        return resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation);
+    }
+
+    private CraftingTreeNode resolveRecursive(ItemStack target, long want, UnifiedStockSnapshot stock,
+                                              VirtualStockTracker tracker, Level level,
+                                              Deque<ResourceLocation> path, int depth,
+                                              @Nullable ItemStack activeWorkstation) {
+        CraftingTreeNode node = new CraftingTreeNode(target, want);
+        try {
+            if (target == null || target.isEmpty() || want <= 0) {
+                return node;
+            }
+            if (depth > MAX_DEPTH || nodeCount > MAX_NODES || System.currentTimeMillis() > deadline) {
+                node.missingAmount = want;
+                node.cutByCycle = true;
+                return node;
+            }
+            nodeCount++;
+
+            ResourceLocation key = VirtualStockTracker.keyOf(target);
+            if (path.contains(key)) {
+                // 循環参照の打ち切り
+                node.missingAmount = want;
+                node.cutByCycle = true;
+                return node;
+            }
+
+            long deficit;
+            if (depth == 0) {
+                // ルートノード: ユーザーは target を want 個作成する計画を求めている
+                long available = 0;
+                try {
+                    available = stock.getTotal(target);
+                } catch (Throwable ignored) {
+                }
+                node.storedAmount = 0;
+                node.totalStockAmount = available;
+                try {
+                    node.autocraftable = stock.isAutocraftableAnywhere(target);
+                } catch (Throwable ignored) {
+                }
+                deficit = want;
+            } else {
+                // 子ノード: 在庫引き当て（手持ち + RS + AE2 の合算）
+                long totalStock = 0;
+                try {
+                    totalStock = stock.getTotal(target);
+                } catch (Throwable ignored) {
+                }
+                node.totalStockAmount = totalStock;
+
+                long available = Math.max(0, totalStock - consumedSoFar(tracker, target));
+                long fromStock = Math.min(available, want);
+                node.storedAmount = fromStock;
+                addConsumed(tracker, target, fromStock);
+
+                deficit = want - fromStock;
+                if (deficit <= 0) {
+                    // 全て在庫で充足
+                    return node;
+                }
+
+                try {
+                    node.autocraftable = stock.isAutocraftableAnywhere(target);
+                } catch (Throwable ignored) {
+                }
+            }
+
+            // 全加工カテゴリからのレシピ候補探索（キャッシュ経由）
+            List<PlannedRecipe> candidates;
+            try {
+                candidates = getOrFindCandidateRecipes(target, level, activeWorkstation, stock);
+            } catch (Throwable t) {
+                CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] recipe lookup failed for {}", key, t);
+                candidates = Collections.emptyList();
+            }
+            if (candidates.isEmpty()) {
+                // レシピが見つからない場合は原材料として不足計上
+                node.missingAmount = deficit;
+                return node;
+            }
+
+            node.alternativeRecipes.clear();
+            node.alternativeRecipes.addAll(candidates);
+            node.selectedRecipeIndex = 0;
+
+            PlannedRecipe chosen = candidates.get(0);
+            node.recipe = chosen.getRecipeHolder();
+            node.station = chosen.getStation();
+
+            int resultCount = chosen.getOutputCount();
+            long crafts = (deficit + resultCount - 1) / resultCount;
+            node.toCraftAmount = crafts * resultCount;
+
+            // 材料をまとめて再帰展開
+            path.addLast(key);
+            try {
+                List<GroupedIngredient> grouped = groupIngredients(chosen.getIngredients(), stock);
+                if (grouped.isEmpty()) {
+                    node.missingAmount = deficit;
+                    return node;
+                }
+                for (GroupedIngredient gi : grouped) {
+                    long need = crafts * gi.count;
+                    CraftingTreeNode child = resolveRecursive(gi.stack, need, stock, tracker, level, path, depth + 1, activeWorkstation);
+                    node.children.add(child);
+                }
+            } finally {
+                path.removeLast();
+            }
+            return node;
+        } catch (Throwable t) {
+            CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] node resolve failed, treated as missing", t);
+            node.missingAmount = want;
+            return node;
+        }
+    }
+
+    /**
+     * 複数レシピが存在するノードで、ユーザーが別のレシピ（別の作業台・製法）を選択した際にサブツリーを再展開する
+     */
+    public void switchRecipe(CraftingTreeNode node, int newIndex, UnifiedStockSnapshot stock, Level level, @Nullable ItemStack activeWorkstation) {
+        if (node == null || node.alternativeRecipes.isEmpty()) return;
+        int idx = (newIndex % node.alternativeRecipes.size() + node.alternativeRecipes.size()) % node.alternativeRecipes.size();
+        node.selectedRecipeIndex = idx;
+        PlannedRecipe chosen = node.alternativeRecipes.get(idx);
+        node.recipe = chosen.getRecipeHolder();
+        node.station = chosen.getStation();
+
+        int resultCount = chosen.getOutputCount();
+        long deficit = Math.max(1, node.requiredAmount - node.storedAmount);
+        long crafts = (deficit + resultCount - 1) / resultCount;
+        node.toCraftAmount = crafts * resultCount;
+
+        // 子ノードを新しいレシピの材料で再展開
+        node.children.clear();
+        nodeCount = 0;
+        recipeCache.clear();
+        deadline = System.currentTimeMillis() + 300;
+        VirtualStockTracker tracker = new VirtualStockTracker();
+        Deque<ResourceLocation> path = new ArrayDeque<>();
+        ResourceLocation key = VirtualStockTracker.keyOf(node.item);
+        path.addLast(key);
+        try {
+            List<GroupedIngredient> grouped = groupIngredients(chosen.getIngredients(), stock);
+            for (GroupedIngredient gi : grouped) {
+                long need = crafts * gi.count;
+                CraftingTreeNode child = resolveRecursive(gi.stack, need, stock, tracker, level, path, 1, activeWorkstation);
+                node.children.add(child);
+            }
+        } finally {
+            path.removeLast();
+        }
+    }
+
+    private static class GroupedIngredient {
+        final ItemStack stack;
+        int count;
+
+        GroupedIngredient(ItemStack stack, int count) {
+            this.stack = stack;
+            this.count = count;
+        }
+    }
+
+    private List<GroupedIngredient> groupIngredients(List<Ingredient> ingredients, UnifiedStockSnapshot stock) {
+        List<GroupedIngredient> result = new ArrayList<>();
+        if (ingredients == null) return result;
+        for (Ingredient ing : ingredients) {
+            if (ing == null || ing.isEmpty()) continue;
+            ItemStack[] options;
+            try {
+                options = ing.getItems();
+            } catch (Throwable t) {
+                continue;
+            }
+            if (options == null || options.length == 0) continue;
+
+            // 候補が複数ある場合（タグ指定等）、既に在庫（手持ち・RS・AE2等）にある候補を最優先で選択
+            ItemStack chosen = options[0];
+            if (options.length > 1 && stock != null) {
+                for (ItemStack opt : options) {
+                    if (opt != null && !opt.isEmpty()) {
+                        try {
+                            if (stock.getTotal(opt) > 0) {
+                                chosen = opt;
+                                break;
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            }
+            if (chosen == null || chosen.isEmpty()) continue;
+
+            boolean found = false;
+            for (GroupedIngredient gi : result) {
+                if (ItemStack.isSameItem(gi.stack, chosen)) {
+                    gi.count++;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                result.add(new GroupedIngredient(chosen.copy(), 1));
+            }
+        }
+        return result;
+    }
+
+    private long consumedSoFar(VirtualStockTracker tracker, ItemStack stack) {
+        try {
+            Long c = consumed.get(stack.getItem());
+            return c == null ? 0 : c;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private void addConsumed(VirtualStockTracker tracker, ItemStack stack, long amount) {
+        try {
+            consumed.merge(stack.getItem(), amount, Long::sum);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static List<Ingredient> safeIngredients(RecipeHolder<?> recipe) {
+        List<Ingredient> list = new ArrayList<>();
+        if (recipe == null || recipe.value() == null) return list;
+        try {
+            List<Ingredient> base = recipe.value().getIngredients();
+            if (base != null) {
+                for (Ingredient ing : base) {
+                    if (ing != null && !ing.isEmpty()) {
+                        list.add(ing);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        // 空の場合（一部MODの鍛冶台レシピや特殊レシピ）はリフレクションで材料フィールドを探索
+        if (list.isEmpty()) {
+            try {
+                for (Class<?> c = recipe.value().getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                    for (Field f : c.getDeclaredFields()) {
+                        if (Ingredient.class.isAssignableFrom(f.getType())) {
+                            f.setAccessible(true);
+                            Object v = f.get(recipe.value());
+                            if (v instanceof Ingredient ing && !ing.isEmpty()) {
+                                list.add(ing);
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return list;
+    }
+
+    public List<PlannedRecipe> getOrFindCandidateRecipes(
+            ItemStack target,
+            Level level,
+            @Nullable ItemStack activeWorkstation,
+            @Nullable UnifiedStockSnapshot stock
+    ) {
+        if (target == null || target.isEmpty()) return Collections.emptyList();
+        net.minecraft.world.item.Item item = target.getItem();
+        List<PlannedRecipe> cached = recipeCache.get(item);
+        if (cached != null) {
+            return cached;
+        }
+        List<PlannedRecipe> list = findAllCandidateRecipes(target, level, activeWorkstation, stock);
+        recipeCache.put(item, list);
+        return list;
+    }
+
+    private static volatile Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> vanillaRecipeIndex = null;
+    private static volatile Object lastRecipeManager = null;
+
+    private static void ensureVanillaIndex(Level level) {
+        if (level == null) return;
+        Object currentRm = level.getRecipeManager();
+        if (vanillaRecipeIndex != null && lastRecipeManager == currentRm) {
+            return;
+        }
+        synchronized (RecipeResolver.class) {
+            if (vanillaRecipeIndex != null && lastRecipeManager == currentRm) {
+                return;
+            }
+            Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> index = new HashMap<>();
+            try {
+                Collection<RecipeHolder<?>> all = level.getRecipeManager().getRecipes();
+                for (RecipeHolder<?> h : all) {
+                    if (h == null || h.value() == null) continue;
+                    try {
+                        ItemStack out = h.value().getResultItem(level.registryAccess());
+                        if (out != null && !out.isEmpty()) {
+                            index.computeIfAbsent(out.getItem(), k -> new ArrayList<>()).add(h);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+            vanillaRecipeIndex = index;
+            lastRecipeManager = currentRm;
+        }
+    }
+
+    private static List<RecipeHolder<?>> getVanillaRecipesFor(net.minecraft.world.item.Item item) {
+        if (vanillaRecipeIndex == null || item == null) return Collections.emptyList();
+        List<RecipeHolder<?>> list = vanillaRecipeIndex.get(item);
+        return list != null ? list : Collections.emptyList();
+    }
+
+    /**
+     * 出力アイテムを作成可能なすべてのレシピ候補（作業台、かまど、合金製錬機、冶金注入機等）を探索して返す
+     */
+    public static List<PlannedRecipe> findAllCandidateRecipes(
+            ItemStack target,
+            Level level,
+            @Nullable ItemStack activeWorkstation,
+            @Nullable UnifiedStockSnapshot stock
+    ) {
+        if (target == null || target.isEmpty()) return Collections.emptyList();
+        List<PlannedRecipe> list = new ArrayList<>();
+        Set<ResourceLocation> seenRecipeIds = new HashSet<>();
+
+        // 1. JEI からの全加工カテゴリ探索
+        boolean jeiFound = false;
+        try {
+            IJeiRuntime runtime = JeiHover.JeiRuntimeHolder.getRuntime();
+            if (runtime != null) {
+                IRecipeManager rm = runtime.getRecipeManager();
+                IJeiHelpers helpers = runtime.getJeiHelpers();
+                IFocusFactory ff = helpers.getFocusFactory();
+
+                ItemStack cleanTarget = new ItemStack(target.getItem(), 1);
+                IFocus<ItemStack> focus = ff.createFocus(RecipeIngredientRole.OUTPUT, VanillaTypes.ITEM_STACK, cleanTarget);
+
+                List<IRecipeCategory<?>> categories = rm.createRecipeCategoryLookup()
+                        .limitFocus(List.of(focus))
+                        .get()
+                        .toList();
+
+                for (IRecipeCategory<?> cat : categories) {
+                    RecipeType<?> recipeType = cat.getRecipeType();
+                    String catId = recipeType.getUid().toString();
+                    String catPath = recipeType.getUid().getPath().toLowerCase(Locale.ROOT);
+                    boolean isCraftingTable = catPath.contains("crafting");
+
+                    // 触媒（作業台・加工機）の取得
+                    List<ItemStack> catalysts = Collections.emptyList();
+                    try {
+                        catalysts = rm.createRecipeCatalystLookup(recipeType)
+                                .getItemStack()
+                                .filter(s -> s != null && !s.isEmpty())
+                                .toList();
+                    } catch (Throwable ignored) {
+                    }
+
+                    ItemStack stationIcon;
+                    if (!catalysts.isEmpty()) {
+                        stationIcon = catalysts.get(0);
+                        if (activeWorkstation != null && !activeWorkstation.isEmpty()) {
+                            for (ItemStack c : catalysts) {
+                                if (ItemStack.isSameItem(c, activeWorkstation)) {
+                                    stationIcon = c;
+                                    break;
+                                }
+                            }
+                        }
+                    } else if (isCraftingTable) {
+                        stationIcon = new ItemStack(Items.CRAFTING_TABLE);
+                    } else if (catPath.contains("smelt") || catPath.contains("furnace")) {
+                        stationIcon = new ItemStack(Items.FURNACE);
+                    } else if (catPath.contains("blast")) {
+                        stationIcon = new ItemStack(Items.BLAST_FURNACE);
+                    } else if (catPath.contains("smok")) {
+                        stationIcon = new ItemStack(Items.SMOKER);
+                    } else if (catPath.contains("stone")) {
+                        stationIcon = new ItemStack(Items.STONECUTTER);
+                    } else if (catPath.contains("smith")) {
+                        stationIcon = new ItemStack(Items.SMITHING_TABLE);
+                    } else {
+                        stationIcon = new ItemStack(Items.CRAFTING_TABLE);
+                    }
+
+                    ProcessingStation station = new ProcessingStation(stationIcon, cat.getTitle(), catId, isCraftingTable);
+
+                    List<?> recipes = Collections.emptyList();
+                    try {
+                        recipes = rm.createRecipeLookup(recipeType)
+                                .limitFocus(List.of(focus))
+                                .get()
+                                .toList();
+                    } catch (Throwable ignored) {
+                    }
+
+                    for (Object r : recipes) {
+                        RecipeHolder<?> holder = (r instanceof RecipeHolder<?> h) ? h : null;
+                        ResourceLocation recipeId = holder != null ? holder.id() : null;
+                        if (recipeId != null && seenRecipeIds.contains(recipeId)) {
+                            continue;
+                        }
+
+                        List<Ingredient> ingredients = new ArrayList<>();
+                        ItemStack outStack = target.copy();
+                        int outCount = 1;
+
+                        if (holder != null && holder.value() != null) {
+                            ingredients.addAll(safeIngredients(holder));
+                            try {
+                                if (level != null) {
+                                    ItemStack res = holder.value().getResultItem(level.registryAccess());
+                                    if (res != null && !res.isEmpty()) {
+                                        outStack = res.copy();
+                                        outCount = Math.max(1, res.getCount());
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                        }
+
+                        // もし safeIngredients で材料が取れなかった場合、または holder がない場合は JEI の IIngredientSupplier から取得
+                        if (ingredients.isEmpty()) {
+                            try {
+                                IIngredientSupplier supp = rm.getRecipeIngredients((IRecipeCategory) cat, r);
+                                if (supp != null) {
+                                    List<ITypedIngredient<?>> inList = supp.getIngredients(RecipeIngredientRole.INPUT);
+                                    for (ITypedIngredient<?> ti : inList) {
+                                        ti.getItemStack().ifPresent(s -> {
+                                            if (!s.isEmpty()) ingredients.add(Ingredient.of(s));
+                                        });
+                                    }
+                                    List<ITypedIngredient<?>> outList = supp.getIngredients(RecipeIngredientRole.OUTPUT);
+                                    for (ITypedIngredient<?> to : outList) {
+                                        if (to.getItemStack().isPresent() && !to.getItemStack().get().isEmpty()) {
+                                            outStack = to.getItemStack().get().copy();
+                                            outCount = Math.max(1, outStack.getCount());
+                                            break;
+                                        }
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                        }
+
+                        if (ingredients.isEmpty()) continue;
+
+                        if (recipeId == null) {
+                            recipeId = ResourceLocation.fromNamespaceAndPath(recipeType.getUid().getNamespace(),
+                                    recipeType.getUid().getPath() + "/" + list.size());
+                        }
+                        seenRecipeIds.add(recipeId);
+
+                        list.add(new PlannedRecipe(recipeId, holder, station, ingredients, outStack, outCount, cat.getTitle()));
+                    }
+                }
+                if (!list.isEmpty()) {
+                    jeiFound = true;
+                }
+            }
+        } catch (Throwable t) {
+            CraftTreePlanner.LOGGER.debug("[CraftTreePlanner] JEI candidate lookup error", t);
+        }
+
+        // 2. Minecraft RecipeManager からの探索（JEIで見つからなかった場合のみ、かつインデックス経由でO(1)探索）
+        if (!jeiFound && level != null) {
+            try {
+                ensureVanillaIndex(level);
+                List<RecipeHolder<?>> matched = getVanillaRecipesFor(target.getItem());
+                for (RecipeHolder<?> h : matched) {
+                    if (h == null || h.value() == null) continue;
+                    if (seenRecipeIds.contains(h.id())) continue;
+
+                    ItemStack out;
+                    try {
+                        out = h.value().getResultItem(level.registryAccess());
+                    } catch (Throwable ignored) {
+                        continue;
+                    }
+                    if (out == null || out.isEmpty()) continue;
+                    if (!ItemMatchHelper.isRecipeOutputMatch(out, target)) continue;
+
+                    List<Ingredient> ingredients = safeIngredients(h);
+                    if (ingredients.isEmpty()) continue;
+
+                    ProcessingStation station = determineStationForVanilla(h);
+                    seenRecipeIds.add(h.id());
+                    list.add(new PlannedRecipe(h.id(), h, station, ingredients, out.copy(), Math.max(1, out.getCount()), station.getDisplayName()));
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        // 候補の優先度ソート
+        sortCandidates(list, target, activeWorkstation, stock);
+        return list;
+    }
+
+    private static ProcessingStation determineStationForVanilla(RecipeHolder<?> h) {
+        if (h.value() instanceof net.minecraft.world.item.crafting.CraftingRecipe) {
+            return ProcessingStation.CRAFTING_TABLE;
+        } else if (h.value() instanceof net.minecraft.world.item.crafting.SmeltingRecipe) {
+            return ProcessingStation.FURNACE;
+        } else if (h.value() instanceof net.minecraft.world.item.crafting.BlastingRecipe) {
+            return new ProcessingStation(new ItemStack(Items.BLAST_FURNACE), Component.translatable("block.minecraft.blast_furnace"), "minecraft:blasting", false);
+        } else if (h.value() instanceof net.minecraft.world.item.crafting.SmokingRecipe) {
+            return new ProcessingStation(new ItemStack(Items.SMOKER), Component.translatable("block.minecraft.smoker"), "minecraft:smoking", false);
+        } else if (h.value() instanceof net.minecraft.world.item.crafting.StonecutterRecipe) {
+            return new ProcessingStation(new ItemStack(Items.STONECUTTER), Component.translatable("block.minecraft.stonecutter"), "minecraft:stonecutting", false);
+        } else if (h.value() instanceof net.minecraft.world.item.crafting.SmithingRecipe) {
+            return new ProcessingStation(new ItemStack(Items.SMITHING_TABLE), Component.translatable("block.minecraft.smithing_table"), "minecraft:smithing", false);
+        }
+        return ProcessingStation.CRAFTING_TABLE;
+    }
+
+    private static void sortCandidates(
+            List<PlannedRecipe> list,
+            ItemStack target,
+            @Nullable ItemStack activeWorkstation,
+            @Nullable UnifiedStockSnapshot stock
+    ) {
+        list.sort((a, b) -> {
+            int scoreA = calculateCandidateScore(a, target, activeWorkstation, stock);
+            int scoreB = calculateCandidateScore(b, target, activeWorkstation, stock);
+            if (scoreA != scoreB) {
+                return Integer.compare(scoreB, scoreA); // 降順
+            }
+            return Integer.compare(a.getIngredients().size(), b.getIngredients().size());
+        });
+    }
+
+    private static int calculateCandidateScore(
+            PlannedRecipe recipe,
+            ItemStack target,
+            @Nullable ItemStack activeWorkstation,
+            @Nullable UnifiedStockSnapshot stock
+    ) {
+        int score = 0;
+        // 1. アクティブスロットにセットされた設備と一致する場合: +1000
+        if (activeWorkstation != null && !activeWorkstation.isEmpty() && recipe.getStation().matches(activeWorkstation)) {
+            score += 1000;
+        }
+        // 2. プレイヤー手持ち/RSにその設備が存在する場合: +500
+        if (stock != null) {
+            try {
+                if (stock.getTotal(recipe.getStation().getIcon()) > 0) {
+                    score += 500;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        // 3. 作業台レシピ: +200（基本クラフトを優先）
+        if (recipe.getStation().isCraftingTable()) {
+            score += 200;
+        }
+        // 4. 材料が在庫にあるか: +50 per ingredient
+        if (stock != null) {
+            for (Ingredient ing : recipe.getIngredients()) {
+                ItemStack[] items = ing.getItems();
+                if (items != null && items.length > 0) {
+                    try {
+                        if (stock.getTotal(items[0]) > 0) {
+                            score += 50;
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        }
+
+        // 5. 逆変換・解体レシピ（例: 鉄ブロック -> 鉄インゴットx9）のペナルティ
+        // 手持ちやRSに在庫がない場合、持っていない圧縮ブロックをわざわざクラフトして解体するのは循環の原因になるため大幅減点
+        if (recipe.getOutputCount() > 1 && recipe.getIngredients().size() == 1) {
+            Ingredient singleIng = recipe.getIngredients().get(0);
+            ItemStack[] items = singleIng.getItems();
+            if (items != null && items.length > 0) {
+                long inStock = (stock != null) ? stock.getTotal(items[0]) : 0;
+                if (inStock <= 0) {
+                    score -= 5000;
+                } else {
+                    score += 300;
+                }
+            }
+        }
+
+        // 6. 自分自身を材料に要求するレシピ（修理、充電、リサイクル等）のペナルティ
+        // 手持ちに在庫がないのに自分自身を要求するレシピは循環の直接原因
+        if (target != null && !target.isEmpty()) {
+            boolean requiresSelf = false;
+            for (Ingredient ing : recipe.getIngredients()) {
+                ItemStack[] items = ing.getItems();
+                if (items != null) {
+                    for (ItemStack opt : items) {
+                        if (ItemStack.isSameItem(opt, target)) {
+                            requiresSelf = true;
+                            break;
+                        }
+                    }
+                }
+                if (requiresSelf) break;
+            }
+            if (requiresSelf) {
+                long inStock = (stock != null) ? stock.getTotal(target) : 0;
+                if (inStock <= 0) {
+                    score -= 10000;
+                }
+            }
+        }
+
+        return score;
+    }
+
+    /** 互換用：単一レシピ探索 */
+    public static RecipeHolder<?> findRecipe(ItemStack target, Level level) {
+        List<PlannedRecipe> candidates = findAllCandidateRecipes(target, level, null, null);
+        return candidates.isEmpty() ? null : candidates.get(0).getRecipeHolder();
+    }
+
+    /** デバッグ用：コンソールにツリー出力 */
+    public static void logTree(CraftingTreeNode node, int indent) {
+        try {
+            String pad = "  ".repeat(Math.max(0, indent));
+            String name = "?";
+            try {
+                name = node.item.getHoverName().getString();
+            } catch (Throwable ignored) {
+            }
+            CraftTreePlanner.LOGGER.info("{}- {} x{} [stored={} (stock={}) craft={} missing={} station={}]{}",
+                    pad, name, node.requiredAmount, node.storedAmount, node.totalStockAmount,
+                    node.toCraftAmount, node.missingAmount, node.station.getDisplayName().getString(),
+                    node.autocraftable ? " (auto)" : "");
+            for (CraftingTreeNode c : node.children) logTree(c, indent + 1);
+        } catch (Throwable ignored) {
+        }
+    }
+}
