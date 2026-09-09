@@ -86,15 +86,68 @@ public class CraftTreeScreen extends Screen {
     private int stationPopupY = 0;
     private double stationPopupScroll = 0;
     private int stationPopupHover = -1;
+    private int stationPopupStage = 0;
+    private int stationPopupGroup = -1;
+    private List<List<Integer>> stationPopupGroups = new ArrayList<>();
     private static final int POPUP_ROW_H = 16;
     private static final int POPUP_MAX_ROWS = 10;
     private static final int POPUP_WIDTH = 186;
+
+    // 探索上限プリセット（深度 / ノード数 / タイムアウトms）
+    private static final int[][] LIMIT_PRESETS = {
+            {16, 250, 300},
+            {24, 800, 800},
+            {32, 2000, 2000},
+            {48, 6000, 5000},
+    };
+    private static int limitPresetIndex = 1;
+
+    // バックグラウンド再計算
+    private static final java.util.concurrent.ExecutorService RESOLVE_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "CraftTreePlanner-Resolve");
+                t.setDaemon(true);
+                return t;
+            });
+    private int recomputeSeq = 0;
+    private boolean computing = false;
+    private long computeStartMs = 0;
+    private volatile int progressNodes = 0;
+
+    private static void applyLimitPreset() {
+        int[] p = LIMIT_PRESETS[limitPresetIndex];
+        com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver.limitMaxDepth = p[0];
+        com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver.limitMaxNodes = p[1];
+        com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver.limitTimeoutMs = p[2];
+    }
+
+    private static String limitPresetLabel() {
+        return tr("gui.crafttreeplanner.limit." + limitPresetIndex);
+    }
+
+    private void cycleLimitPreset() {
+        limitPresetIndex = (limitPresetIndex + 1) % LIMIT_PRESETS.length;
+        applyLimitPreset();
+        recompute();
+    }
 
     private void openStationPopup(CraftingTreeNode node, int anchorX, int anchorY) {
         stationPopupNode = node;
         stationPopupScroll = 0;
         stationPopupHover = -1;
-        int visible = Math.min(node.alternativeRecipes.size(), POPUP_MAX_ROWS);
+        stationPopupStage = 0;
+        stationPopupGroup = -1;
+        // カテゴリごとにレシピをグループ化（出現順を維持）
+        Map<String, List<Integer>> grouped = new LinkedHashMap<>();
+        for (int i = 0; i < node.alternativeRecipes.size(); i++) {
+            PlannedRecipe alt = node.alternativeRecipes.get(i);
+            String uid = (alt.getStation() != null && alt.getStation().getCategoryUid() != null)
+                    ? alt.getStation().getCategoryUid()
+                    : ("station" + i);
+            grouped.computeIfAbsent(uid, k -> new ArrayList<>()).add(i);
+        }
+        stationPopupGroups = new ArrayList<>(grouped.values());
+        int visible = Math.min(popupCurrentRowCount(), POPUP_MAX_ROWS);
         int panelH = visible * POPUP_ROW_H + 8;
         int px = anchorX + 18;
         if (px + POPUP_WIDTH > width - 4) {
@@ -105,15 +158,37 @@ public class CraftTreeScreen extends Screen {
         stationPopupY = py;
     }
 
+    private int popupCurrentRowCount() {
+        if (stationPopupNode == null) return 0;
+        if (stationPopupStage == 0) return stationPopupGroups.size();
+        if (stationPopupGroup < 0 || stationPopupGroup >= stationPopupGroups.size()) return 0;
+        List<Integer> group = stationPopupGroups.get(stationPopupGroup);
+        return group == null ? 0 : group.size();
+    }
+
+    private int popupHeaderH() {
+        return stationPopupStage == 0 ? 0 : 14;
+    }
+
     private void closeStationPopup() {
         stationPopupNode = null;
         stationPopupHover = -1;
+        stationPopupStage = 0;
+        stationPopupGroup = -1;
     }
 
     private int stationPopupMaxScroll() {
-        if (stationPopupNode == null) return 0;
-        int visible = Math.min(stationPopupNode.alternativeRecipes.size(), POPUP_MAX_ROWS);
-        return Math.max(0, (stationPopupNode.alternativeRecipes.size() - visible) * POPUP_ROW_H);
+        int count = popupCurrentRowCount();
+        int visible = Math.min(count, POPUP_MAX_ROWS);
+        return Math.max(0, (count - visible) * POPUP_ROW_H);
+    }
+
+    private int popupFirstRow() {
+        int count = popupCurrentRowCount();
+        int first = (int) (stationPopupScroll / POPUP_ROW_H);
+        int visible = Math.min(count, POPUP_MAX_ROWS);
+        int maxFirst = Math.max(0, count - visible);
+        return Math.max(0, Math.min(first, maxFirst));
     }
 
     private void selectAlternative(CraftingTreeNode node, int index) {
@@ -342,14 +417,44 @@ public class CraftTreeScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || targetItem.isEmpty()) return;
 
+        // 在庫スナップショットの構築だけメインスレッドで行い、ツリー計算はワーカースレッドへ
         UnifiedStockSnapshot snapshot = new UnifiedStockSnapshot();
         snapshot.addProvider(new PlayerInventoryStock(mc.player));
         snapshot.addProvider(new RefinedStorageStock());
         snapshot.addProvider(new Ae2Stock());
 
-        this.root = new RecipeResolver().resolve(targetItem, quantity, snapshot, mc.level, slottedWorkstation);
-        flatten();
-        updateMaxScroll();
+        final int seq = ++recomputeSeq;
+        final net.minecraft.world.level.Level level = mc.level;
+        final long qty = quantity;
+        final ItemStack target = targetItem.copy();
+        final ItemStack ws = slottedWorkstation.copy();
+
+        computing = true;
+        computeStartMs = System.currentTimeMillis();
+        progressNodes = 0;
+
+        RESOLVE_EXECUTOR.submit(() -> {
+            if (seq != recomputeSeq) return; // 新しい要求が発行済みなら何もしない
+            try {
+                com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver resolver =
+                        new com.kumanchu.crafttreeplanner.core.calculation.RecipeResolver();
+                CraftingTreeNode newRoot = resolver.resolve(target, qty, snapshot, level, ws, (nodes, finished) -> {
+                    if (seq == recomputeSeq) progressNodes = nodes;
+                });
+                Minecraft.getInstance().execute(() -> {
+                    if (seq != recomputeSeq || Minecraft.getInstance().screen != this) return;
+                    this.root = newRoot;
+                    computing = false;
+                    flatten();
+                    updateMaxScroll();
+                });
+            } catch (Throwable t) {
+                CraftTreePlanner.LOGGER.warn("[CraftTreePlanner] async resolve failed", t);
+                Minecraft.getInstance().execute(() -> {
+                    if (seq == recomputeSeq) computing = false;
+                });
+            }
+        });
     }
 
     private void cycleWorkstationFromPlayer() {
@@ -452,6 +557,13 @@ public class CraftTreeScreen extends Screen {
         int btnY = winY + 7;
         int btnH = 20;
         int curRight = winX + winWidth - 8;
+
+        // 0. 探索上限プリセット
+        curRight -= 76;
+        addRenderableWidget(Button.builder(Component.literal(limitPresetLabel()), b -> cycleLimitPreset())
+                .bounds(curRight, btnY, 76, btnH).build());
+
+        curRight -= 4; // 区切り
 
         // 1. アイテム名表示切り替えボタン (名前:ON / 名前:OFF)
         curRight -= 48;
@@ -870,6 +982,23 @@ public class CraftTreeScreen extends Screen {
         // 7. ウィジェット描画（ボタン等）
         super.render(g, mouseX, mouseY, partial);
 
+        // 探索中プログレスバー（最前面）
+        if (computing) {
+            int barW = Math.min(220, winWidth - 40);
+            int barX = winX + (winWidth - barW) / 2;
+            int barY = winY + winHeight - footerH - 12;
+            long elapsed = System.currentTimeMillis() - computeStartMs;
+            int presetNodes = LIMIT_PRESETS[limitPresetIndex][1];
+            int pct = Math.min(95, (int) (progressNodes * 100L / Math.max(1, presetNodes)));
+            g.fill(barX, barY, barX + barW, barY + 9, 0xFF11111B);
+            int fillW = Math.max(4, barW * pct / 100);
+            int barColor = ((elapsed / 150) % 2 == 0) ? 0xFF89B4FA : 0xFF7C87F5;
+            g.fill(barX + 1, barY + 1, barX + 1 + (barW - 2) * Math.max(6, pct) / 100, barY + 8, barColor);
+            drawBorder(g, barX, barY, barW, 9, 0xFF45475A);
+            String txt = tr("gui.crafttreeplanner.status.searching") + " " + pct + "% (" + (elapsed / 1000) + "s)";
+            g.drawCenteredString(font, txt, winX + winWidth / 2, barY - 10, 0xFFA6ADC8);
+        }
+
         // 8. ツールチップ描画（最前面）
         if (isHoveringWorkstationSlot) {
             List<Component> tooltip = new ArrayList<>();
@@ -981,22 +1110,30 @@ public class CraftTreeScreen extends Screen {
 
     private void renderStationPopup(GuiGraphics g, int mouseX, int mouseY) {
         if (stationPopupNode == null || stationPopupNode.alternativeRecipes.isEmpty()) {
-            stationPopupNode = null;
+            closeStationPopup();
             return;
         }
-        List<PlannedRecipe> alts = stationPopupNode.alternativeRecipes;
-        int visible = Math.min(alts.size(), POPUP_MAX_ROWS);
+        int count = popupCurrentRowCount();
+        if (count <= 0) {
+            closeStationPopup();
+            return;
+        }
+        int visible = Math.min(count, POPUP_MAX_ROWS);
         int panelW = POPUP_WIDTH;
-        int panelH = visible * POPUP_ROW_H + 8;
+        int headerH = popupHeaderH();
+        int panelH = headerH + visible * POPUP_ROW_H + 8;
         int px = stationPopupX;
         int py = stationPopupY;
+        int listTop = py + 4 + headerH;
 
         // ホバー行検出（描画と同時に行う）
         stationPopupHover = -1;
-        if (mouseX >= px && mouseX <= px + panelW && mouseY >= py + 4 && mouseY < py + 4 + visible * POPUP_ROW_H) {
-            int rowIdx = (mouseY - (py + 4)) / POPUP_ROW_H;
-            int idx = firstPopupRow() + rowIdx;
-            if (idx >= 0 && idx < alts.size()) {
+        if (stationPopupStage == 1 && mouseY >= py + 3 && mouseY < py + 3 + 13 && mouseX >= px && mouseX <= px + panelW) {
+            stationPopupHover = -2; // 戻るヘッダー
+        } else if (mouseX >= px && mouseX <= px + panelW && mouseY >= listTop && mouseY < listTop + visible * POPUP_ROW_H) {
+            int rowIdx = (mouseY - listTop) / POPUP_ROW_H;
+            int idx = popupFirstRow() + rowIdx;
+            if (idx >= 0 && idx < count) {
                 stationPopupHover = idx;
             }
         }
@@ -1005,54 +1142,82 @@ public class CraftTreeScreen extends Screen {
         drawBorder(g, px, py, panelW, panelH, 0xFF89B4FA);
         drawBorder(g, px + 1, py + 1, panelW - 2, panelH - 2, 0xFF313244);
 
-        g.enableScissor(px + 1, py + 1, px + panelW - 1, py + panelH - 1);
+        // ステージ2: 戻るヘッダー
+        if (stationPopupStage != 0) {
+            boolean backHovered = (stationPopupHover == -2);
+            g.fill(px + 2, py + 2, px + panelW - 2, py + 17, backHovered ? 0x3389B4FA : 0x22181825);
+            g.drawString(font, tr("gui.crafttreeplanner.popup.back"), px + 6, py + 6,
+                    backHovered ? 0xFFFFFFFF : 0xFF89B4FA, true);
+        }
+
+        g.enableScissor(px + 1, listTop, px + panelW - 1, py + panelH - 1);
         int iconArea = POPUP_WIDTH - 54;
         for (int i = 0; i < visible; i++) {
-            int idx = firstPopupRow() + i;
-            if (idx < 0 || idx >= alts.size()) continue;
-            PlannedRecipe alt = alts.get(idx);
-            int rowY = py + 4 + i * POPUP_ROW_H;
-            boolean isHovered = (stationPopupHover == idx);
+            int rowIdx = popupFirstRow() + i;
+            if (rowIdx < 0 || rowIdx >= count) continue;
+            int rowY = listTop + i * POPUP_ROW_H;
+            boolean isHovered = (stationPopupHover == rowIdx);
             if (isHovered) {
                 g.fill(px + 2, rowY, px + panelW - 2, rowY + POPUP_ROW_H, 0x3389B4FA);
             }
 
-            boolean isCur = (idx == stationPopupNode.selectedRecipeIndex);
-            String stName = alt.getStation().getDisplayName().getString();
-            String catName = alt.getCategoryTitle().getString();
-            String label = (isCur ? "✔ " : "  ") + stName
-                    + (catName.equals(stName) ? "" : " (" + catName + ")");
-            int maxLabelW = iconArea - 12;
-            if (font.width(label) > maxLabelW) {
-                label = font.plainSubstrByWidth(label, maxLabelW - 6) + "…";
-            }
-            g.drawString(font, label, px + 5, rowY + 4,
-                    isCur ? 0xFFA6E3A1 : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4), true);
-
-            // 材料プレビューアイコン（先頭3種）で候補を識別しやすく
-            List<ItemStack> previews = new ArrayList<>(3);
-            for (Ingredient ing : alt.getIngredients()) {
-                if (previews.size() >= 3) break;
-                try {
-                    ItemStack[] options = ing.getItems();
-                    if (options != null && options.length > 0 && options[0] != null && !options[0].isEmpty()) {
-                        previews.add(options[0]);
-                    }
-                } catch (Throwable ignored) {
+            if (stationPopupStage == 0) {
+                // ステージ1: 加工カテゴリ一覧
+                List<Integer> group = stationPopupGroups.get(rowIdx);
+                PlannedRecipe rep = group != null && !group.isEmpty()
+                        ? stationPopupNode.alternativeRecipes.get(group.get(0)) : null;
+                if (rep == null) continue;
+                boolean containsCurrent = group != null && group.contains(stationPopupNode.selectedRecipeIndex);
+                String stName = rep.getStation().getDisplayName().getString();
+                String label = (containsCurrent ? "✔ " : "  ") + stName + "  ×" + group.size();
+                int maxLabelW = iconArea - 12;
+                if (font.width(label) > maxLabelW) {
+                    label = font.plainSubstrByWidth(label, maxLabelW - 6) + "…";
                 }
-            }
-            for (int pi = 0; pi < previews.size(); pi++) {
-                g.renderFakeItem(previews.get(pi), px + panelW - 54 + pi * 18, rowY);
+                g.drawString(font, label, px + 5, rowY + 4,
+                        containsCurrent ? 0xFFA6E3A1 : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4), true);
+
+                // カテゴリを代表する触媒アイコン
+                ItemStack stIcon = rep.getStation().getIcon();
+                if (stIcon != null && !stIcon.isEmpty()) {
+                    g.renderFakeItem(stIcon, px + panelW - 36, rowY);
+                }
+            } else {
+                // ステージ2: 選択カテゴリ内のレシピ一覧
+                List<Integer> group = stationPopupGroups.get(stationPopupGroup);
+                if (group == null || rowIdx >= group.size()) continue;
+                int globalIdx = group.get(rowIdx);
+                PlannedRecipe alt = stationPopupNode.alternativeRecipes.get(globalIdx);
+                boolean isCur = (globalIdx == stationPopupNode.selectedRecipeIndex);
+                String stName = alt.getStation().getDisplayName().getString();
+                String catName = alt.getCategoryTitle().getString();
+                String label = (isCur ? "✔ " : "  ") + stName
+                        + (catName.equals(stName) ? "" : " (" + catName + ")");
+                int maxLabelW = iconArea - 12;
+                if (font.width(label) > maxLabelW) {
+                    label = font.plainSubstrByWidth(label, maxLabelW - 6) + "…";
+                }
+                g.drawString(font, label, px + 5, rowY + 4,
+                        isCur ? 0xFFA6E3A1 : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4), true);
+
+                // 材料プレビューアイコン（先頭3種）で候補を識別しやすく
+                List<ItemStack> previews = new ArrayList<>(3);
+                for (Ingredient ing : alt.getIngredients()) {
+                    if (previews.size() >= 3) break;
+                    try {
+                        ItemStack[] options = ing.getItems();
+                        if (options != null && options.length > 0 && options[0] != null && !options[0].isEmpty()) {
+                            previews.add(options[0]);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+                for (int pi = 0; pi < previews.size(); pi++) {
+                    g.renderFakeItem(previews.get(pi), px + panelW - 54 + pi * 18, rowY);
+                }
             }
         }
         g.disableScissor();
-    }
-
-    private int firstPopupRow() {
-        int first = (int) (stationPopupScroll / POPUP_ROW_H);
-        int visible = Math.min(stationPopupNode == null ? 0 : stationPopupNode.alternativeRecipes.size(), POPUP_MAX_ROWS);
-        int maxFirst = Math.max(0, (stationPopupNode == null ? 0 : stationPopupNode.alternativeRecipes.size()) - visible);
-        return Math.max(0, Math.min(first, maxFirst));
     }
 
     /** 作成アクション実行：手持ち＆RSストレージから直接材料を引いて中間クラフトを含め全自動直接作成 */
@@ -1081,16 +1246,39 @@ public class CraftTreeScreen extends Screen {
         }
         if (node.toCraftAmount > 0 && node.recipe != null) {
             long perCraft = 1;
+            ItemStack expectedOutput = ItemStack.EMPTY;
             try {
                 if (Minecraft.getInstance().level != null) {
                     ItemStack out = node.recipe.value().getResultItem(Minecraft.getInstance().level.registryAccess());
-                    perCraft = Math.max(1, out.getCount());
+                    if (out != null && !out.isEmpty()) {
+                        perCraft = Math.max(1, out.getCount());
+                        expectedOutput = out.copyWithCount((int) Math.min(64, perCraft));
+                    }
                 }
             } catch (Throwable ignored) {
             }
             long executions = (node.toCraftAmount + perCraft - 1) / perCraft;
+            if (expectedOutput.isEmpty()) {
+                // レシピ出力が取得不能な機械レシピ等: 計画値から期待出力を組み立てる
+                long perOut = Math.max(1, executions > 0 ? node.toCraftAmount / executions : node.toCraftAmount);
+                expectedOutput = node.item.copyWithCount((int) Math.max(1, perOut));
+            }
+
+            // 1実行あたりの材料（子ノードの総必要数をクラフト回数で割る）
+            Map<Item, Integer> perExec = new LinkedHashMap<>();
+            for (CraftingTreeNode child : node.children) {
+                if (child == null || child.item == null || child.item.isEmpty()) continue;
+                long per = executions > 0 ? Math.round(child.requiredAmount / (double) executions) : child.requiredAmount;
+                if (per <= 0) per = 1;
+                perExec.merge(child.item.getItem(), (int) Math.min(64, per), Integer::sum);
+            }
+            List<ItemStack> inputs = new ArrayList<>();
+            for (Map.Entry<Item, Integer> e : perExec.entrySet()) {
+                inputs.add(new ItemStack(e.getKey(), Math.max(1, e.getValue())));
+            }
+
             ItemStack stationIcon = (node.station != null) ? node.station.getIcon() : ItemStack.EMPTY;
-            steps.add(new DirectCraftStep(node.recipe.id(), (int) executions, stationIcon));
+            steps.add(new DirectCraftStep(node.recipe.id(), (int) executions, stationIcon, expectedOutput, inputs));
         }
     }
 
@@ -1098,14 +1286,40 @@ public class CraftTreeScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         // 加工法ポップアップ: 最優先で処理
         if (stationPopupNode != null) {
-            int panelH = Math.min(stationPopupNode.alternativeRecipes.size(), POPUP_MAX_ROWS) * POPUP_ROW_H + 8;
+            int headerH = popupHeaderH();
+            int panelH = headerH + Math.min(popupCurrentRowCount(), POPUP_MAX_ROWS) * POPUP_ROW_H + 8;
+            int listTop = stationPopupY + 4 + headerH;
             boolean insidePanel = mouseX >= stationPopupX && mouseX <= stationPopupX + POPUP_WIDTH
                     && mouseY >= stationPopupY && mouseY <= stationPopupY + panelH;
-            if (insidePanel && button == 0 && stationPopupHover >= 0) {
-                int idx = stationPopupHover;
-                CraftingTreeNode node = stationPopupNode;
-                closeStationPopup();
-                selectAlternative(node, idx);
+            if (insidePanel) {
+                if (stationPopupStage == 1 && mouseY < listTop && stationPopupHover == -2) {
+                    // 戻る: カテゴリ一覧へ
+                    stationPopupStage = 0;
+                    stationPopupGroup = -1;
+                    stationPopupScroll = 0;
+                    return true;
+                }
+                if (button == 0 && stationPopupHover >= 0) {
+                    int rowIdx = stationPopupHover;
+                    CraftingTreeNode node = stationPopupNode;
+                    if (stationPopupStage == 0) {
+                        // カテゴリ選択 → レシピ一覧へ
+                        if (rowIdx >= 0 && rowIdx < stationPopupGroups.size()) {
+                            stationPopupStage = 1;
+                            stationPopupGroup = rowIdx;
+                            stationPopupScroll = 0;
+                        }
+                    } else {
+                        // レシピ選択
+                        List<Integer> group = (stationPopupGroup >= 0 && stationPopupGroup < stationPopupGroups.size())
+                                ? stationPopupGroups.get(stationPopupGroup) : null;
+                        if (group != null && rowIdx < group.size()) {
+                            int globalIdx = group.get(rowIdx);
+                            closeStationPopup();
+                            selectAlternative(node, globalIdx);
+                        }
+                    }
+                }
             } else {
                 closeStationPopup();
             }
@@ -1395,7 +1609,8 @@ public class CraftTreeScreen extends Screen {
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         // ポップアップ上でのホイール: 候補リスクロールを優先
         if (stationPopupNode != null) {
-            int panelH = Math.min(stationPopupNode.alternativeRecipes.size(), POPUP_MAX_ROWS) * POPUP_ROW_H + 8;
+            int headerH = popupHeaderH();
+            int panelH = headerH + Math.min(popupCurrentRowCount(), POPUP_MAX_ROWS) * POPUP_ROW_H + 8;
             if (mouseX >= stationPopupX && mouseX <= stationPopupX + POPUP_WIDTH
                     && mouseY >= stationPopupY && mouseY <= stationPopupY + panelH) {
                 stationPopupScroll = Math.max(0, Math.min(stationPopupMaxScroll(), stationPopupScroll - scrollY * POPUP_ROW_H));

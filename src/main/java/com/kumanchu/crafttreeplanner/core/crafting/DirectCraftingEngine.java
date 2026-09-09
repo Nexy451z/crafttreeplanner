@@ -109,6 +109,13 @@ public class DirectCraftingEngine {
             ));
             return;
         }
+        // サーバー保護: 異常に大きいリクエストの拒否
+        if (steps.size() > 256) {
+            PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
+                    false, Component.translatable("msg.crafttreeplanner.no_steps"), ItemStack.EMPTY, 0
+            ));
+            return;
+        }
 
         List<ItemStack> intermediatePool = new ArrayList<>();
         List<ItemStack> extractedFromPlayer = new ArrayList<>();
@@ -133,7 +140,7 @@ public class DirectCraftingEngine {
         for (int stepIdx = 0; stepIdx < steps.size(); stepIdx++) {
             DirectCraftStep step = steps.get(stepIdx);
             ResourceLocation recipeId = step.recipeId();
-            int executions = Math.max(1, step.count());
+            int executions = Math.max(1, Math.min(4096, step.count()));
 
             Optional<RecipeHolder<?>> recipeOpt = level.getRecipeManager().byKey(recipeId);
             if (recipeOpt.isEmpty()) {
@@ -203,27 +210,55 @@ public class DirectCraftingEngine {
                         }
                     }
                 } else {
-                    // かまど・合金製錬機などの非グリッド加工レシピ
+                    // かまど・合金製錬機・機械レシピ（MOD含む）などの非グリッド加工レシピ
                     List<Ingredient> ingredients = RecipeResolver.safeIngredients(recipeOpt.get());
+                    boolean usingClientInputs = false;
+                    // Mekanism等、getIngredientsが空で独自Ingredient型のレシピ:
+                    // 正規入力が取得不能なため、クライアントが計算した材料リストを代用する（READMEの制限事項）
+                    List<ItemStack> clientInputs = step.inputs();
+                    if (ingredients.isEmpty() && clientInputs != null && !clientInputs.isEmpty()) {
+                        usingClientInputs = true;
+                    }
+
                     List<ItemStack> inputItems = new ArrayList<>();
-
-                    for (Ingredient ing : ingredients) {
-                        if (ing.isEmpty()) continue;
-                        ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
-                        if (extracted.isEmpty()) {
-                            rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
-                            return;
+                    if (usingClientInputs) {
+                        for (ItemStack need : clientInputs) {
+                            if (need == null || need.isEmpty()) continue;
+                            int needCount = Math.max(1, need.getCount());
+                            ItemStack template = need.copyWithCount(1);
+                            for (int k = 0; k < needCount; k++) {
+                                ItemStack extracted = pullExact(player, template, intermediatePool, extractedFromPlayer, extractedFromRs);
+                                if (extracted.isEmpty()) {
+                                    rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                                            Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
+                                    return;
+                                }
+                                inputItems.add(extracted);
+                                ItemStack remainder = extracted.getCraftingRemainingItem();
+                                if (!remainder.isEmpty()) {
+                                    producedRemainders.add(remainder);
+                                }
+                            }
                         }
-                        inputItems.add(extracted);
+                    } else {
+                        for (Ingredient ing : ingredients) {
+                            if (ing.isEmpty()) continue;
+                            ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
+                            if (extracted.isEmpty()) {
+                                rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
+                                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
+                                return;
+                            }
+                            inputItems.add(extracted);
 
-                        ItemStack remainder = extracted.getCraftingRemainingItem();
-                        if (!remainder.isEmpty()) {
-                            producedRemainders.add(remainder);
+                            ItemStack remainder = extracted.getCraftingRemainingItem();
+                            if (!remainder.isEmpty()) {
+                                producedRemainders.add(remainder);
+                            }
                         }
                     }
 
-                    // 1. SingleRecipeInput での assemble 試行（かまど、高炉、石切機等）
+                    // 1. SingleRecipeInput での assemble 試行（かまど、高炉、石切機、Mekanism item系等）
                     if (inputItems.size() == 1) {
                         try {
                             SingleRecipeInput singleInput = new SingleRecipeInput(inputItems.get(0));
@@ -232,7 +267,7 @@ public class DirectCraftingEngine {
                         }
                     }
 
-                    // 2. getResultItem による取得（MODの加工機レシピ等）
+                    // 2. getResultItem による取得（Oritech / Create ProcessingRecipe / Mekanism BasicItemStackToItemStack 等はここで取れる）
                     if (assembled.isEmpty()) {
                         try {
                             assembled = rawRecipe.getResultItem(level.registryAccess());
@@ -240,9 +275,17 @@ public class DirectCraftingEngine {
                         }
                     }
 
-                    // 3. 最終工程でのフォールバック
-                    if (assembled.isEmpty() && isFinalStep) {
-                        assembled = targetItem.copy();
+                    // 3. サーバーでレシピ出力が取得できた場合、クライアントの期待出力よりレシピ出力を優先（改ざん対策）
+                    ItemStack expected = step.expectedOutput();
+                    if (!assembled.isEmpty() && expected != null && !expected.isEmpty()
+                            && !ItemStack.isSameItemSameComponents(assembled, expected)) {
+                        // 出力種が食い違う場合はレシピ側を正とする
+                        expected = null;
+                    }
+
+                    // 4. レシピから出力が取れない特殊レシピのみ、消費済みの前提でクライアント出力を採用
+                    if (assembled.isEmpty() && expected != null && !expected.isEmpty()) {
+                        assembled = expected.copyWithCount(Math.max(1, expected.getCount()));
                     }
 
                     if (assembled.isEmpty()) {
@@ -364,6 +407,62 @@ public class DirectCraftingEngine {
             }
         }
         return false;
+    }
+
+    /** 具体的なアイテムスタック（テンプレート）と同一かで引き当てる（クライアント計算入力用） */
+    private static ItemStack pullExact(
+            ServerPlayer player,
+            ItemStack template,
+            List<ItemStack> intermediatePool,
+            List<ItemStack> extractedFromPlayer,
+            List<ItemStack> extractedFromRs
+    ) {
+        // 1. 中間プールから探索
+        for (int i = 0; i < intermediatePool.size(); i++) {
+            ItemStack poolStack = intermediatePool.get(i);
+            if (!poolStack.isEmpty() && ItemStack.isSameItemSameComponents(poolStack, template)) {
+                ItemStack single = poolStack.split(1);
+                if (poolStack.isEmpty()) {
+                    intermediatePool.remove(i);
+                }
+                return single;
+            }
+        }
+
+        // 2. プレイヤー手持ちインベントリ
+        for (int s = 0; s < player.getInventory().items.size(); s++) {
+            ItemStack invStack = player.getInventory().items.get(s);
+            if (!invStack.isEmpty() && ItemStack.isSameItemSameComponents(invStack, template)) {
+                ItemStack single = invStack.split(1);
+                if (invStack.isEmpty()) {
+                    player.getInventory().items.set(s, ItemStack.EMPTY);
+                }
+                extractedFromPlayer.add(single.copy());
+                return single;
+            }
+        }
+        for (int s = 0; s < player.getInventory().offhand.size(); s++) {
+            ItemStack offStack = player.getInventory().offhand.get(s);
+            if (!offStack.isEmpty() && ItemStack.isSameItemSameComponents(offStack, template)) {
+                ItemStack single = offStack.split(1);
+                if (offStack.isEmpty()) {
+                    player.getInventory().offhand.set(s, ItemStack.EMPTY);
+                }
+                extractedFromPlayer.add(single.copy());
+                return single;
+            }
+        }
+
+        // 3. RS ストレージから探索
+        if (RefinedStorageServerHelper.isRsContainerOpen(player)) {
+            ItemStack rsSingle = RefinedStorageServerHelper.extractSingle(player, Ingredient.of(template));
+            if (!rsSingle.isEmpty()) {
+                extractedFromRs.add(rsSingle.copy());
+                return rsSingle;
+            }
+        }
+
+        return ItemStack.EMPTY;
     }
 
     private static void rollback(

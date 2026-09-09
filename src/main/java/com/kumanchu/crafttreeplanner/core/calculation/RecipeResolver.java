@@ -35,9 +35,35 @@ import java.util.concurrent.ConcurrentHashMap;
  * のレシピを網羅的に探索し、複数候補の切り替えや対応作業台の特定を行う。
  */
 public class RecipeResolver {
-    private static final int MAX_DEPTH = 16;
-    private static final int MAX_NODES = 250;
-    private static final long LOOKUP_TIMEOUT_MS = 300;
+    /** 実行時の探索上限。画面内プリセットで上書きされる（null = 設定ファイル値を使用） */
+    public static volatile int limitMaxDepth = -1;
+    public static volatile int limitMaxNodes = -1;
+    public static volatile int limitTimeoutMs = -1;
+    public static volatile boolean limitDemoteInfoCategories = true;
+
+    private static int maxDepth() {
+        return limitMaxDepth > 0 ? limitMaxDepth : com.kumanchu.crafttreeplanner.Config.CONFIG_MAX_DEPTH.get();
+    }
+
+    private static int maxNodes() {
+        return limitMaxNodes > 0 ? limitMaxNodes : com.kumanchu.crafttreeplanner.Config.CONFIG_MAX_NODES.get();
+    }
+
+    private static long timeoutMs() {
+        return limitTimeoutMs > 0 ? limitTimeoutMs : com.kumanchu.crafttreeplanner.Config.CONFIG_TIMEOUT_MS.get();
+    }
+
+    private static boolean demoteInfoCategories() {
+        return limitDemoteInfoCategories && com.kumanchu.crafttreeplanner.Config.CONFIG_DEMOTE_INFO_CATEGORIES.get();
+    }
+
+    /** 探索進捗通知（ノード展開数）。バックグラウンド計算の進捗バー用。 */
+    public interface ProgressListener {
+        void onProgress(int expandedNodes, boolean finished);
+    }
+
+    @javax.annotation.Nullable
+    private ProgressListener progressListener = null;
     private int nodeCount = 0;
     private long deadline = 0;
     private final Map<net.minecraft.world.item.Item, Long> consumed = new HashMap<>();
@@ -49,12 +75,22 @@ public class RecipeResolver {
     }
 
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level, @Nullable ItemStack activeWorkstation) {
+        return resolve(target, wantCount, stock, level, activeWorkstation, null);
+    }
+
+    public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level,
+                                    @Nullable ItemStack activeWorkstation, @Nullable ProgressListener progress) {
+        progressListener = progress;
         nodeCount = 0;
         consumed.clear();
-        deadline = System.currentTimeMillis() + LOOKUP_TIMEOUT_MS; // 最大300msで安全に打ち切り
+        deadline = System.currentTimeMillis() + timeoutMs(); // 上限時間で安全に打ち切り
         VirtualStockTracker tracker = new VirtualStockTracker();
         Deque<ResourceLocation> path = new ArrayDeque<>();
-        return resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation);
+        CraftingTreeNode result = resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation);
+        if (progressListener != null) {
+            progressListener.onProgress(nodeCount, true);
+        }
+        return result;
     }
 
     private CraftingTreeNode resolveRecursive(ItemStack target, long want, UnifiedStockSnapshot stock,
@@ -118,12 +154,15 @@ public class RecipeResolver {
                 node.cutByCycle = true;
                 return node;
             }
-            if (depth > MAX_DEPTH || nodeCount > MAX_NODES || System.currentTimeMillis() > deadline) {
+            if (depth > maxDepth() || nodeCount > maxNodes() || System.currentTimeMillis() > deadline) {
                 node.missingAmount = deficit;
                 node.cutByLimit = true;
                 return node;
             }
             nodeCount++;
+            if (progressListener != null) {
+                progressListener.onProgress(nodeCount, false);
+            }
 
             // 全加工カテゴリからのレシピ候補探索（キャッシュ経由）
             List<PlannedRecipe> candidates;
@@ -195,7 +234,7 @@ public class RecipeResolver {
         node.children.clear();
         nodeCount = 0;
         consumed.clear();
-        deadline = System.currentTimeMillis() + LOOKUP_TIMEOUT_MS;
+        deadline = System.currentTimeMillis() + timeoutMs();
         VirtualStockTracker tracker = new VirtualStockTracker();
         Deque<ResourceLocation> path = new ArrayDeque<>();
         ResourceLocation key = VirtualStockTracker.keyOf(node.item);
@@ -339,9 +378,7 @@ public class RecipeResolver {
         List<PlannedRecipe> sorted = new ArrayList<>(raw);
         sortCandidates(sorted, target, activeWorkstation, stock);
         return sorted;
-    }
-
-    /** レシピ再読込（データパック更新・サーバー同期）時に全キャッシュを破棄する */
+    }    /** レシピ再読込（データパック更新・サーバー同期）時に全キャッシュを破棄する */
     public static void invalidateCaches() {
         candidateCache.clear();
         vanillaRecipeIndex = null;
@@ -507,7 +544,13 @@ public class RecipeResolver {
                                     List<ITypedIngredient<?>> inList = supp.getIngredients(RecipeIngredientRole.INPUT);
                                     for (ITypedIngredient<?> ti : inList) {
                                         ti.getItemStack().ifPresent(s -> {
-                                            if (!s.isEmpty()) ingredients.add(Ingredient.of(s));
+                                            if (!s.isEmpty()) {
+                                                // JEI表示上の個数（機械レシピの「1操作あたりの消費数」）を保持する
+                                                int copies = Math.max(1, Math.min(64, s.getCount()));
+                                                for (int ci = 0; ci < copies; ci++) {
+                                                    ingredients.add(Ingredient.of(s));
+                                                }
+                                            }
                                         });
                                     }
                                     List<ITypedIngredient<?>> outList = supp.getIngredients(RecipeIngredientRole.OUTPUT);
@@ -673,11 +716,13 @@ public class RecipeResolver {
             score += 80;
         }
         // 1a. プレイヤーが直接実行できない情報カテゴリ（村人の取引・クエスト・ドロップ等）は大きく減点
-        String uid = recipe.getStation().getCategoryUid() == null ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
-        if (uid.contains("trade") || uid.contains("villag") || uid.contains("wander") || uid.contains("merchant")
-                || uid.contains("quest") || uid.contains("loot") || uid.contains("drop")
-                || uid.contains("gift") || uid.contains("barter") || uid.contains("reward")) {
-            score -= 600;
+        if (demoteInfoCategories()) {
+            String uid = recipe.getStation().getCategoryUid() == null ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
+            if (uid.contains("trade") || uid.contains("villag") || uid.contains("wander") || uid.contains("merchant")
+                    || uid.contains("quest") || uid.contains("loot") || uid.contains("drop")
+                    || uid.contains("gift") || uid.contains("barter") || uid.contains("reward")) {
+                score -= 600;
+            }
         }
         // 1. アクティブスロットにセットされた設備と一致する場合: +1000
         if (activeWorkstation != null && !activeWorkstation.isEmpty() && recipe.getStation().matches(activeWorkstation)) {
@@ -755,7 +800,7 @@ public class RecipeResolver {
 
     /** 互換用：単一レシピ探索 */
     public static RecipeHolder<?> findRecipe(ItemStack target, Level level) {
-        List<PlannedRecipe> candidates = findAllCandidateRecipes(target, level, null, null, System.currentTimeMillis() + LOOKUP_TIMEOUT_MS);
+        List<PlannedRecipe> candidates = findAllCandidateRecipes(target, level, null, null, System.currentTimeMillis() + timeoutMs());
         sortCandidates(candidates, target, null, null);
         return candidates.isEmpty() ? null : candidates.get(0).getRecipeHolder();
     }

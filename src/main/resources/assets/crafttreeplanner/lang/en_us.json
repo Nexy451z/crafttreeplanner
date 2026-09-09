@@ -13,6 +13,11 @@
   "gui.crafttreeplanner.button.close": "Close",
 
   "gui.crafttreeplanner.amount.label": "Amount",
+  "gui.crafttreeplanner.limit.0": "Limits: Light",
+  "gui.crafttreeplanner.limit.1": "Limits: Normal",
+  "gui.crafttreeplanner.limit.2": "Limits: Large",
+  "gui.crafttreeplanner.limit.3": "Limits: Huge",
+  "gui.crafttreeplanner.popup.back": "← Back",
 
   "gui.crafttreeplanner.badge.missing": "Missing %s",
   "gui.crafttreeplanner.badge.craft_with_stock": "Craft %s (stock %s)",
@@ -31,6 +36,7 @@
   "gui.crafttreeplanner.slot.output": "Result",
   "gui.crafttreeplanner.slot.output_ph": "O",
 
+  "gui.crafttreeplanner.status.searching": "Searching",
   "gui.crafttreeplanner.status.ready": "✔ All materials ready - one-click craft available",
   "gui.crafttreeplanner.status.missing_summary": "✘ Missing: %s kinds (%s) | Steps: %s",
   "gui.crafttreeplanner.status.crafting": "Crafting...",

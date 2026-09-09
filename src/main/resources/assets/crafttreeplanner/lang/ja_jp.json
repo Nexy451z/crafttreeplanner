@@ -13,6 +13,11 @@
   "gui.crafttreeplanner.button.close": "閉じる",
 
   "gui.crafttreeplanner.amount.label": "数量",
+  "gui.crafttreeplanner.limit.0": "上限:軽量",
+  "gui.crafttreeplanner.limit.1": "上限:標準",
+  "gui.crafttreeplanner.limit.2": "上限:大規模",
+  "gui.crafttreeplanner.limit.3": "上限:超大",
+  "gui.crafttreeplanner.popup.back": "← 戻る",
 
   "gui.crafttreeplanner.badge.missing": "不足 %s",
   "gui.crafttreeplanner.badge.craft_with_stock": "作成 %s (在庫 %s)",
@@ -31,6 +36,7 @@
   "gui.crafttreeplanner.slot.output": "完成品",
   "gui.crafttreeplanner.slot.output_ph": "出",
 
+  "gui.crafttreeplanner.status.searching": "探索中",
   "gui.crafttreeplanner.status.ready": "✔ 素材完備 - ワンクリック作成可能",
   "gui.crafttreeplanner.status.missing_summary": "✘ 不足: %s種類 (%s個) | 工程: %s回",
   "gui.crafttreeplanner.status.crafting": "クラフト実行中...",

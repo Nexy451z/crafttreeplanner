@@ -16,6 +16,7 @@ public class CraftTreePlanner {
 
     public CraftTreePlanner(IEventBus modEventBus, ModContainer modContainer) {
         LOGGER.info("[CraftTreePlanner] init");
+        modContainer.registerConfig(net.neoforged.fml.config.ModConfig.Type.CLIENT, Config.SPEC);
         modEventBus.addListener(com.kumanchu.crafttreeplanner.network.CraftTreeNetwork::register);
         if (FMLEnvironment.dist == Dist.CLIENT) {
             KeyInputHandler.register(modEventBus);
