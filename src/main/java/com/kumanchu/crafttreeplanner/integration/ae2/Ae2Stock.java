@@ -4,18 +4,25 @@ import com.kumanchu.crafttreeplanner.CraftTreePlanner;
 import com.kumanchu.crafttreeplanner.core.ItemMatchHelper;
 import com.kumanchu.crafttreeplanner.core.stock.IStockProvider;
 import com.kumanchu.crafttreeplanner.integration.ModIntegration;
+import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEKey;
+import appeng.menu.me.common.GridInventoryEntry;
+import appeng.menu.me.common.IClientRepo;
+import appeng.menu.me.common.MEStorageMenu;
 import net.minecraft.client.Minecraft;
-import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 
-import java.lang.reflect.Method;
-import java.util.Collection;
-import java.util.List;
+import java.util.Set;
 
 /**
- * AE2在庫取得。コンパイル依存なし（リフレクションのみ）。
- * 調査結果: 開いているMEStorageMenu#getClientRepo().getAllEntries()
- * → GridInventoryEntry#getWhat/getStoredAmount/isCraftable が正規経路。
+ * AE2在庫取得。コンパイル時依存あり（Applied Energistics 2 19.2.17 の正規クラス）。
+ * 実行時は ModIntegration.isAe2Loaded() でガードされ、AE2未導入環境ではこのクラスの
+ * メソッド本体が実行されないため NoClassDefFoundError は発生しない。
+ * 経路（デコンパイル実物で確認済み）:
+ *  - MEStorageMenu#getClientRepo() -> IClientRepo
+ *  - IClientRepo#getAllEntries() -> Set&lt;GridInventoryEntry&gt;
+ *  - GridInventoryEntry#getWhat/getStoredAmount/isCraftable
+ *  - AEItemKey#toStack()
  */
 public class Ae2Stock implements IStockProvider {
 
@@ -29,33 +36,38 @@ public class Ae2Stock implements IStockProvider {
         try {
             if (!ModIntegration.isAe2Loaded()) return false;
             if (Minecraft.getInstance().player == null) return false;
-            AbstractContainerMenu menu = Minecraft.getInstance().player.containerMenu;
-            if (menu == null) return false;
-            String name = menu.getClass().getName().toLowerCase();
-            return name.contains("appeng") || name.contains("mestorage") || name.contains("craftingterm")
-                    || name.contains("patternterm") || name.contains("meterminal");
+            return Minecraft.getInstance().player.containerMenu instanceof MEStorageMenu;
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    private static IClientRepo clientRepoOrNull() {
+        try {
+            if (!ModIntegration.isAe2Loaded()) return null;
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null || !(mc.player.containerMenu instanceof MEStorageMenu menu)) return null;
+            return menu.getClientRepo();
+        } catch (Throwable t) {
+            return null;
         }
     }
 
     @Override
     public long getAmount(ItemStack stack) {
         try {
-            if (!isAvailable() || stack == null || stack.isEmpty()) return 0;
-            Object repo = getClientRepo();
+            if (stack == null || stack.isEmpty()) return 0;
+            IClientRepo repo = clientRepoOrNull();
             if (repo == null) return 0;
-            Collection<?> entries = getAllEntries(repo);
+            Set<GridInventoryEntry> entries = repo.getAllEntries();
             if (entries == null) return 0;
             long total = 0;
-            for (Object e : entries) {
-                try {
-                    ItemStack what = extractItem(e);
-                    if (what == null || what.isEmpty()) continue;
-                    if (!ItemMatchHelper.isStockMatch(what, stack)) continue;
-                    total += extractStored(e);
-                } catch (Throwable t) {
-                    continue;
+            for (GridInventoryEntry entry : entries) {
+                if (entry == null) continue;
+                ItemStack what = entryToStack(entry);
+                if (what == null || what.isEmpty()) continue;
+                if (ItemMatchHelper.isStockMatch(what, stack)) {
+                    total += Math.max(0, entry.getStoredAmount());
                 }
             }
             return total;
@@ -65,149 +77,58 @@ public class Ae2Stock implements IStockProvider {
         }
     }
 
-    /**
-     * メインスレッドから呼ぶこと。AE2端末のクライアントリポジトリを不変スナップショットとして取り込む。
-     */
-    public static List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> captureEntries() {
-        try {
-            Ae2Stock temp = new Ae2Stock();
-            if (!temp.isAvailable()) return List.of();
-            Object repo = temp.getClientRepo();
-            if (repo == null) return List.of();
-            Collection<?> entries = temp.getAllEntries(repo);
-            if (entries == null) return List.of();
-            List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> out = new java.util.ArrayList<>();
-            for (Object e : entries) {
-                try {
-                    ItemStack what = temp.extractItem(e);
-                    if (what == null || what.isEmpty()) continue;
-                    out.add(new com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry(
-                            what.copy(), temp.extractStored(e), temp.extractCraftable(e)));
-                } catch (Throwable ignored) {
-                }
-            }
-            return List.copyOf(out);
-        } catch (Throwable t) {
-            return List.of();
-        }
-    }
-
     @Override
     public boolean isAutocraftable(ItemStack stack) {
         try {
-            if (!isAvailable() || stack == null || stack.isEmpty()) return false;
-            Object repo = getClientRepo();
+            if (stack == null || stack.isEmpty()) return false;
+            IClientRepo repo = clientRepoOrNull();
             if (repo == null) return false;
-            Collection<?> entries = getAllEntries(repo);
+            Set<GridInventoryEntry> entries = repo.getAllEntries();
             if (entries == null) return false;
-            for (Object e : entries) {
+            for (GridInventoryEntry entry : entries) {
+                if (entry == null) continue;
+                ItemStack what = entryToStack(entry);
+                if (what == null || what.isEmpty()) continue;
+                if (ItemMatchHelper.isStockMatch(what, stack) && entry.isCraftable()) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * メインスレッドから呼ぶこと。AE2端末のクライアントリポジトリを不変スナップショットとして取り込む。
+     */
+    public static java.util.List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> captureEntries() {
+        try {
+            IClientRepo repo = clientRepoOrNull();
+            if (repo == null) return java.util.List.of();
+            Set<GridInventoryEntry> entries = repo.getAllEntries();
+            if (entries == null) return java.util.List.of();
+            java.util.List<com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry> out = new java.util.ArrayList<>();
+            for (GridInventoryEntry entry : entries) {
                 try {
-                    ItemStack what = extractItem(e);
+                    ItemStack what = entryToStack(entry);
                     if (what == null || what.isEmpty()) continue;
-                    if (!ItemMatchHelper.isStockMatch(what, stack)) continue;
-                    if (extractCraftable(e)) return true;
+                    out.add(new com.kumanchu.crafttreeplanner.core.stock.StaticStockProvider.Entry(
+                            what.copy(), entry.getStoredAmount(), entry.isCraftable()));
                 } catch (Throwable ignored) {
                 }
             }
-            return false;
+            return java.util.List.copyOf(out);
         } catch (Throwable t) {
-            return false;
+            return java.util.List.of();
         }
     }
 
-    private Object getClientRepo() {
-        try {
-            AbstractContainerMenu menu = Minecraft.getInstance().player.containerMenu;
-            Method m = null;
-            for (Method cand : menu.getClass().getMethods()) {
-                if (cand.getName().equals("getClientRepo") && cand.getParameterCount() == 0) {
-                    m = cand;
-                    break;
-                }
-            }
-            if (m == null) return null;
-            m.setAccessible(true);
-            return m.invoke(menu);
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Collection<?> getAllEntries(Object repo) {
-        try {
-            for (Method m : repo.getClass().getMethods()) {
-                if (m.getName().equals("getAllEntries") && m.getParameterCount() == 0) {
-                    m.setAccessible(true);
-                    Object r = m.invoke(repo);
-                    if (r instanceof Collection<?> c) return c;
-                }
-            }
-        } catch (Throwable ignored) {
+    private static ItemStack entryToStack(GridInventoryEntry entry) {
+        AEKey what = entry.getWhat();
+        if (what instanceof AEItemKey itemKey) {
+            return itemKey.toStack();
         }
         return null;
-    }
-
-    /** GridInventoryEntry#getWhat() → AE2Key → ItemStack変換を試みる */
-    private ItemStack extractItem(Object entry) {
-        try {
-            Method getWhat = null;
-            for (Method m : entry.getClass().getMethods()) {
-                if (m.getName().equals("getWhat") && m.getParameterCount() == 0) {
-                    getWhat = m;
-                    break;
-                }
-            }
-            if (getWhat == null) return null;
-            getWhat.setAccessible(true);
-            Object what = getWhat.invoke(entry);
-            if (what == null) return null;
-            if (what instanceof ItemStack s) return s;
-            // AE2Key (AEItemKey) → wrap / asItemStack / toStack 等を総当たり
-            for (Method m : what.getClass().getMethods()) {
-                try {
-                    String n = m.getName().toLowerCase();
-                    if (m.getParameterCount() != 0) continue;
-                    if (!(n.contains("stack") || n.contains("item") || n.contains("wrap"))) continue;
-                    m.setAccessible(true);
-                    Object r = m.invoke(what);
-                    if (r instanceof ItemStack s) return s;
-                } catch (Throwable ignored) {
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private long extractStored(Object entry) {
-        try {
-            for (Method m : entry.getClass().getMethods()) {
-                String n = m.getName().toLowerCase();
-                if (m.getParameterCount() != 0) continue;
-                if (!(n.contains("stored") || n.contains("amount"))) continue;
-                m.setAccessible(true);
-                Object r = m.invoke(entry);
-                if (r instanceof Number num) return num.longValue();
-            }
-        } catch (Throwable ignored) {
-        }
-        return 0;
-    }
-
-    private boolean extractCraftable(Object entry) {
-        try {
-            for (Method m : entry.getClass().getMethods()) {
-                String n = m.getName().toLowerCase();
-                if (m.getParameterCount() != 0) continue;
-                if (!(n.contains("craftable") || n.contains("craft"))) continue;
-                if (!m.getReturnType().equals(boolean.class) && !m.getReturnType().equals(Boolean.class)) continue;
-                m.setAccessible(true);
-                Object r = m.invoke(entry);
-                if (r instanceof Boolean b) return b;
-            }
-        } catch (Throwable ignored) {
-        }
-        return false;
     }
 }

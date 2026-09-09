@@ -33,11 +33,13 @@ Hover over any item and open a full crafting tree (AE2-style): it shows what you
 |-----|--------------|
 | JEI | Machine-agnostic recipe search, R/U keybinds, recipe/usage windows |
 | REI | Same hooks via reflection (works without JEI) |
-| Refined Storage 2 | Grid stock counts, ingredient extraction/crafting grid automation (compiled against RS 2.0.9, tested with 2.0.9) |
-| Applied Energistics 2 | ME terminal stock counts + "autocraftable" badge (reflection) |
+| Refined Storage 2 | Grid stock counts, ingredient extraction (compiled against RS 2.0.9, tested with 2.0.9) |
+| Applied Energistics 2 | ME terminal stock counts + "autocraftable" badge (compiled against AE2 19.2.17) |
 
 No hard dependency: the mod runs fine with JEI/REI/RS/AE2 absent (fallback to the vanilla `RecipeManager`).
-JEI and Refined Storage are **compile-time** integrations (typed API calls guarded at runtime by mod-presence checks); AE2/REI still use reflection. One known internal detail: Refined Storage's grid menu keeps its `Grid` field private with no public accessor, so that single field is read reflectively (typed + guarded).
+JEI, Refined Storage and AE2 are **compile-time** integrations (typed API calls guarded at runtime by mod-presence checks); REI still uses reflection. One known internal detail: Refined Storage's grid menu keeps its `Grid` field private with no public accessor, so that single field is read reflectively (typed + guarded).
+
+**Modded machine recipes** (Mekanism, Create, Oritech, Industrial Foregoing, Farmers Delight, Mystical Agriculture, AE2 pattern-style, etc.) are executed server-side through a generic path: inputs are read from the recipe (vanilla `getIngredients`, reflection over `Ingredient` fields, or custom input APIs like Mekanism's `ItemStackIngredient`), and outputs from `getResultItem` or a generic discovery over the recipe object's own output fields/methods — all server-side data, no client-trusted output minting. Recipes whose inputs include non-item resources (gases, fluids) are skipped.
 
 ## Building
 
@@ -59,6 +61,12 @@ Refined Storage is pinned the same way (full mod jar from [maven.creeperhost.net
 
 ```properties
 refinedstorage_version=2.0.9
+```
+
+Applied Energistics 2 the same way (full mod jar from Maven Central):
+
+```properties
+ae2_version=19.2.17
 ```
 
 To test inside the dev client with JEI installed, the `localRuntime` dependency fetches the full JEI jar automatically (`./gradlew runClient`).

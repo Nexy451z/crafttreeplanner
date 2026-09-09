@@ -310,8 +310,12 @@ public class DirectCraftingEngine {
                         }
                     }
 
-                    // クライアント送信のexpectedOutputは改ざん可能なため出力のmintには使用しない。
-                    // レシピから出力が取れないレシピは実行不可としてロールバックする
+                    // 3. 汎用出力ディスカバリ（getResultItemがEMPTYのMODレシピ向け。
+                    //    すべてレシピオブジェクト自身（サーバー実データ）から取得するため改ざん耐性は維持される）
+                    if (assembled.isEmpty()) {
+                        assembled = discoverRecipeOutput(rawRecipe);
+                    }
+
                     if (assembled.isEmpty()) {
                         rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
                                 Component.translatable("msg.crafttreeplanner.process_failed", String.valueOf(recipeId)));
@@ -368,6 +372,88 @@ public class DirectCraftingEngine {
         PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
                 false, message, ItemStack.EMPTY, 0
         ));
+    }
+
+    /** 出力ディスカバリのメソッド/フィールドキャッシュ（実行毎のリフレクションコスト回避） */
+    private static final Map<Class<?>, java.util.List<java.lang.reflect.Method>> OUTPUT_METHOD_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, java.util.List<java.lang.reflect.Field>> OUTPUT_FIELD_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * レシピオブジェクトからItemStack出力を汎用的に発見する（全てサーバー側データ）。
+     * 優先順: 0引数メソッドの戻り値ItemStack（名前にoutput/result）→ List&lt;ItemStack&gt;の0引数メソッド
+     * （getResults/getOutputDefinition等）→ ItemStack/List&lt;ItemStack&gt;フィールド。
+     */
+    private static ItemStack discoverRecipeOutput(Recipe<?> recipe) {
+        try {
+            Class<?> cls = recipe.getClass();
+
+            java.util.List<java.lang.reflect.Method> methods = OUTPUT_METHOD_CACHE.computeIfAbsent(cls, c -> {
+                java.util.List<java.lang.reflect.Method> found = new ArrayList<>();
+                for (Class<?> cur = c; cur != null && cur != Object.class; cur = cur.getSuperclass()) {
+                    for (java.lang.reflect.Method m : cur.getDeclaredMethods()) {
+                        if (m.getParameterCount() != 0) continue;
+                        if (java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
+                        String name = m.getName().toLowerCase(Locale.ROOT);
+                        if (!name.contains("output") && !name.contains("result")) continue;
+                        m.setAccessible(true);
+                        found.add(m);
+                    }
+                }
+                // 出力語を含むメソッドを優先順に並べる: 正確な "output" 名 → ItemStack戻り値 → その他
+                found.sort((a, b) -> {
+                    boolean aStack = ItemStack.class.isAssignableFrom(a.getReturnType());
+                    boolean bStack = ItemStack.class.isAssignableFrom(b.getReturnType());
+                    if (aStack != bStack) return aStack ? -1 : 1;
+                    boolean aOut = a.getName().toLowerCase(Locale.ROOT).contains("output");
+                    boolean bOut = b.getName().toLowerCase(Locale.ROOT).contains("output");
+                    if (aOut != bOut) return aOut ? -1 : 1;
+                    return 0;
+                });
+                return found;
+            });
+
+            for (java.lang.reflect.Method m : methods) {
+                try {
+                    Object v = m.invoke(recipe);
+                    if (v instanceof ItemStack s && !s.isEmpty()) return s;
+                    if (v instanceof List<?> l) {
+                        for (Object e : l) {
+                            if (e instanceof ItemStack s && !s.isEmpty()) return s;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+
+            java.util.List<java.lang.reflect.Field> fields = OUTPUT_FIELD_CACHE.computeIfAbsent(cls, c -> {
+                java.util.List<java.lang.reflect.Field> found = new ArrayList<>();
+                for (Class<?> cur = c; cur != null && cur != Object.class; cur = cur.getSuperclass()) {
+                    for (java.lang.reflect.Field f : cur.getDeclaredFields()) {
+                        Class<?> t = f.getType();
+                        if (ItemStack.class.isAssignableFrom(t)
+                                || (List.class.isAssignableFrom(t))) {
+                            f.setAccessible(true);
+                            found.add(f);
+                        }
+                    }
+                }
+                return found;
+            });
+            for (java.lang.reflect.Field f : fields) {
+                try {
+                    Object v = f.get(recipe);
+                    if (v instanceof ItemStack s && !s.isEmpty()) return s;
+                    if (v instanceof List<?> l) {
+                        for (Object e : l) {
+                            if (e instanceof ItemStack s && !s.isEmpty()) return s;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return ItemStack.EMPTY;
     }
 
     private static ItemStack pullIngredient(

@@ -353,7 +353,81 @@ public class RecipeResolver {
             } catch (Throwable ignored) {
             }
         }
+        // 独自入力API（Mekanism ItemStackIngredient等、バニラIngredientでない場合）:
+        // getInput系0引数メソッドの戻り値から ItemStack 候補を抽出してバニラIngredient化する
+        if (list.isEmpty()) {
+            list.addAll(discoverIngredientsViaInputApi(recipe.value()));
+        }
         return list;
+    }
+
+    /** 独自入力API探索のメソッドキャッシュ（実行毎のリフレクションコスト回避） */
+    private static final Map<Class<?>, java.util.List<java.lang.reflect.Method>> INPUT_METHOD_CACHE = new ConcurrentHashMap<>();
+
+    private static List<Ingredient> discoverIngredientsViaInputApi(Object recipe) {
+        List<Ingredient> result = new ArrayList<>();
+        try {
+            java.util.List<java.lang.reflect.Method> candidates = INPUT_METHOD_CACHE.computeIfAbsent(recipe.getClass(), c -> {
+                java.util.List<java.lang.reflect.Method> found = new ArrayList<>();
+                for (Class<?> cur = c; cur != null && cur != Object.class; cur = cur.getSuperclass()) {
+                    for (java.lang.reflect.Method m : cur.getDeclaredMethods()) {
+                        if (m.getParameterCount() != 0) continue;
+                        if (java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
+                        String name = m.getName().toLowerCase(Locale.ROOT);
+                        Class<?> ret = m.getReturnType();
+                        if (ret == void.class || ret == Ingredient.class || Ingredient.class.isAssignableFrom(ret)) continue;
+                        if (name.contains("input") || name.contains("ingredient")) {
+                            m.setAccessible(true);
+                            found.add(m);
+                        }
+                    }
+                }
+                return found;
+            });
+            for (java.lang.reflect.Method m : candidates) {
+                try {
+                    Object input = m.invoke(recipe);
+                    if (input == null) continue;
+                    List<ItemStack> stacks = extractStackList(input);
+                    if (!stacks.isEmpty()) {
+                        result.add(Ingredient.of(stacks.toArray(new ItemStack[0])));
+                    }
+                } catch (Throwable ignored) {
+                }
+                if (!result.isEmpty()) break;
+            }
+        } catch (Throwable ignored) {
+        }
+        return result;
+    }
+
+    /** オブジェクトからItemStackのリストを抽出（自身がCollection、またはgetRepresentations/getRepresentationの戻り値） */
+    private static List<ItemStack> extractStackList(Object obj) {
+        try {
+            if (obj instanceof Collection<?> coll) {
+                List<ItemStack> stacks = new ArrayList<>();
+                for (Object e : coll) {
+                    if (e instanceof ItemStack s && !s.isEmpty()) stacks.add(s);
+                }
+                return stacks;
+            }
+            for (String name : new String[]{"getRepresentations", "getRepresentation", "getStacks"}) {
+                try {
+                    java.lang.reflect.Method m = obj.getClass().getMethod(name);
+                    Object v = m.invoke(obj);
+                    if (v instanceof Collection<?> coll) {
+                        List<ItemStack> stacks = new ArrayList<>();
+                        for (Object e : coll) {
+                            if (e instanceof ItemStack s && !s.isEmpty()) stacks.add(s);
+                        }
+                        return stacks;
+                    }
+                } catch (NoSuchMethodException ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return List.of();
     }
 
     /** キャッシュ世代。invalidateCachesで加算され、世代不一致のエントリは無効扱い */

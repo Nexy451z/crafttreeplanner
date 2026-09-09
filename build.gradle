@@ -40,6 +40,7 @@ repositories {
             includeGroup "com.refinedmods.refinedstorage"
         }
     }
+    mavenCentral()
 }
 
 base {
@@ -127,6 +128,11 @@ dependencies {
     // such as AbstractGridContainerMenu that the published *-api modules do not include).
     // Runtime is still optional: integration code is guarded by ModIntegration.isRefinedStorageLoaded().
     compileOnly "com.refinedmods.refinedstorage:refinedstorage-neoforge:${refinedstorage_version}"
+
+    // Applied Energistics 2: compiled against the full mod jar from Maven Central
+    // (MEStorageMenu / GridInventoryEntry are outside the published *-api jar).
+    // Runtime is still optional: integration code is guarded by ModIntegration.isAe2Loaded().
+    compileOnly "org.appliedenergistics:appliedenergistics2:${ae2_version}"
 
 
     // Example mod dependency using a mod jar from ./libs with a flat dir repository
