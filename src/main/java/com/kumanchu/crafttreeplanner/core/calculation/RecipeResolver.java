@@ -664,6 +664,11 @@ public class RecipeResolver {
             @Nullable UnifiedStockSnapshot stock
     ) {
         int score = 0;
+        // 0. サーバー側で実行可能なレシピ（RecipeHolder持ち）を優先。
+        // JEIのみに存在する合成IDレシピは直接作成できずロールバックになるため、実体がある方を先に選ぶ
+        if (recipe.getRecipeHolder() != null) {
+            score += 80;
+        }
         // 1. アクティブスロットにセットされた設備と一致する場合: +1000
         if (activeWorkstation != null && !activeWorkstation.isEmpty() && recipe.getStation().matches(activeWorkstation)) {
             score += 1000;

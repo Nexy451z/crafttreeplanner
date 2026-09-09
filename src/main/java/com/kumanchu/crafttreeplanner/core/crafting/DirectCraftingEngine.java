@@ -138,7 +138,7 @@ public class DirectCraftingEngine {
             Optional<RecipeHolder<?>> recipeOpt = level.getRecipeManager().byKey(recipeId);
             if (recipeOpt.isEmpty()) {
                 rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.recipe_not_found", recipeId));
+                        Component.translatable("msg.crafttreeplanner.recipe_not_found", String.valueOf(recipeId)));
                 return;
             }
 
@@ -163,7 +163,7 @@ public class DirectCraftingEngine {
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
                             if (extracted.isEmpty()) {
                                 rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.ingredient_missing", recipeId));
+                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
                             inputItems.set(i, extracted);
@@ -180,7 +180,7 @@ public class DirectCraftingEngine {
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
                             if (extracted.isEmpty()) {
                                 rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.ingredient_missing", recipeId));
+                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
                             inputItems.set(i, extracted);
@@ -191,7 +191,7 @@ public class DirectCraftingEngine {
                     assembled = craftingRecipe.assemble(craftingInput, level.registryAccess());
                     if (assembled.isEmpty()) {
                         rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                Component.translatable("msg.crafttreeplanner.assemble_failed", recipeId));
+                                Component.translatable("msg.crafttreeplanner.assemble_failed", String.valueOf(recipeId)));
                         return;
                     }
 
@@ -212,7 +212,7 @@ public class DirectCraftingEngine {
                         ItemStack extracted = pullIngredient(player, ing, intermediatePool, extractedFromPlayer, extractedFromRs);
                         if (extracted.isEmpty()) {
                             rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                        Component.translatable("msg.crafttreeplanner.ingredient_missing", recipeId));
+                        Component.translatable("msg.crafttreeplanner.ingredient_missing", String.valueOf(recipeId)));
                             return;
                         }
                         inputItems.add(extracted);
@@ -247,7 +247,7 @@ public class DirectCraftingEngine {
 
                     if (assembled.isEmpty()) {
                         rollback(player, extractedFromPlayer, extractedFromRs, intermediatePool,
-                                Component.translatable("msg.crafttreeplanner.process_failed", recipeId));
+                                Component.translatable("msg.crafttreeplanner.process_failed", String.valueOf(recipeId)));
                         return;
                     }
                 }
