@@ -43,3 +43,4 @@ repo/
 build-*.log
 port-errors*.txt
 port-symbols.txt
+build-port.ps1
