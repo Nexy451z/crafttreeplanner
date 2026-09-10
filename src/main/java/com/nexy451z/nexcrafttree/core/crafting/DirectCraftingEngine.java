@@ -564,7 +564,17 @@ public class DirectCraftingEngine {
             return single;
         }
 
-        // 3. RS ストレージから探索
+        // 3. Sophisticated Backpacks 内から探索
+        if (com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge.isAvailable()) {
+            ItemStack bpSingle = com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge
+                    .extractFirst(player, s -> isIngredientMatch(ing, s));
+            if (!bpSingle.isEmpty()) {
+                extractedFromPlayer.add(bpSingle.copy());
+                return bpSingle;
+            }
+        }
+
+        // 4. RS ストレージから探索
         if (RefinedStorageServerHelper.isRsContainerOpen(player)) {
             ItemStack rsSingle = RefinedStorageServerHelper.extractSingle(player, ing);
             if (!rsSingle.isEmpty()) {
@@ -632,7 +642,17 @@ public class DirectCraftingEngine {
             return single;
         }
 
-        // 3. RS ストレージから探索
+        // 3. Sophisticated Backpacks 内から完全一致で探索
+        if (com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge.isAvailable()) {
+            ItemStack bpSingle = com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge
+                    .extractFirst(player, s -> ItemStack.isSameItemSameComponents(s, template));
+            if (!bpSingle.isEmpty()) {
+                extractedFromPlayer.add(bpSingle.copy());
+                return bpSingle;
+            }
+        }
+
+        // 4. RS ストレージから探索
         if (RefinedStorageServerHelper.isRsContainerOpen(player)) {
             ItemStack rsSingle = RefinedStorageServerHelper.extractSingleExact(player, template);
             if (!rsSingle.isEmpty()) {
@@ -752,6 +772,11 @@ public class DirectCraftingEngine {
         }
         ItemStack offStack = player.getInventory().getItem(net.minecraft.world.entity.player.Inventory.SLOT_OFFHAND);
         if (!offStack.isEmpty() && (ItemStack.isSameItem(target, offStack) || ItemMatchHelper.isStockMatch(target, offStack))) {
+            return true;
+        }
+        if (com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge.isAvailable()
+                && com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge
+                        .contains(player, s -> ItemStack.isSameItem(target, s) || ItemMatchHelper.isStockMatch(target, s))) {
             return true;
         }
         if (RefinedStorageServerHelper.isRsContainerOpen(player) && RefinedStorageServerHelper.hasItem(player, target)) {

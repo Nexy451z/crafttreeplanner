@@ -889,6 +889,12 @@ public class RecipeResolver {
             @Nullable UnifiedStockSnapshot stock
     ) {
         list.sort((a, b) -> {
+            // 第1キー: 作業台レシピが存在するなら常に最優先（設備スロット固定や在庫ボーナスより強い）
+            int groupA = candidateGroupRank(a);
+            int groupB = candidateGroupRank(b);
+            if (groupA != groupB) {
+                return Integer.compare(groupA, groupB);
+            }
             int scoreA = calculateCandidateScore(a, target, activeWorkstation, stock);
             int scoreB = calculateCandidateScore(b, target, activeWorkstation, stock);
             if (scoreA != scoreB) {
@@ -896,6 +902,24 @@ public class RecipeResolver {
             }
             return Integer.compare(a.getIngredients().size(), b.getIngredients().size());
         });
+    }
+
+    /**
+     * ソート第1キー。
+     *  0: 作業台クラフト（クラフトレシピがある場合は常に先頭）
+     *  1: その他の加工機・MODレシピ
+     *  2: 情報専用カテゴリ（取引・ドロップ等）＝最底辺
+     */
+    public static int candidateGroupRank(PlannedRecipe recipe) {
+        try {
+            if (recipe == null || recipe.getStation() == null) return 1;
+            String uid = recipe.getStation().getCategoryUid() == null
+                    ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
+            if (demoteInfoCategories() && isInfoCategoryUid(uid)) return 2;
+            if (recipe.getStation().isCraftingTable()) return 0;
+        } catch (Throwable ignored) {
+        }
+        return 1;
     }
 
     /**

@@ -1,5 +1,5 @@
 {
-  "key.categories.nexcrafttree": "NexCraftTree",
+  "key.category.nexcrafttree.main": "NexCraftTree",
   "key.nexcrafttree.open": "打开合成树",
 
   "gui.nexcrafttree.tree": "合成树",

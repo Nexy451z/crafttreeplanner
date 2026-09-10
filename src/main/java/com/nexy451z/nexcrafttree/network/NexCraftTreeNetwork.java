@@ -36,6 +36,18 @@ public class NexCraftTreeNetwork {
                 DirectCraftingEngine::handleTakeOutput
         );
 
+        registrar.playToClient(
+                ClientboundBackpackStockPayload.TYPE,
+                ClientboundBackpackStockPayload.STREAM_CODEC,
+                BackpackStockClientReceiver::handle
+        );
+
+        registrar.playToServer(
+                ServerboundRequestBackpackStockPayload.TYPE,
+                ServerboundRequestBackpackStockPayload.STREAM_CODEC,
+                com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackStockServer::handleRequest
+        );
+
         NexCraftTree.LOGGER.info("[NexCraftTree] Network payloads registered successfully.");
     }
 
@@ -51,6 +63,10 @@ public class NexCraftTreeNetwork {
 
     public static void sendTakeOutputRequest() {
         net.neoforged.neoforge.client.network.ClientPacketDistributor.sendToServer(new ServerboundTakeOutputPayload());
+    }
+
+    public static void sendBackpackStockRequest() {
+        net.neoforged.neoforge.client.network.ClientPacketDistributor.sendToServer(ServerboundRequestBackpackStockPayload.INSTANCE);
     }
 }
 

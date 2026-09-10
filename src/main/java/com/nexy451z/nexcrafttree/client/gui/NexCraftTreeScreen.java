@@ -118,6 +118,12 @@ public class NexCraftTreeScreen extends Screen {
     private long computeStartMs = 0;
     private volatile int progressNodes = 0;
 
+    /** 開いている画面インスタンス（バックパック在庫の同期受信時に再計算するため） */
+    private static volatile NexCraftTreeScreen activeScreen = null;
+    private static long lastBackpackRequestMs = 0L;
+    /** バックパック同期の定期リフレッシュ間隔（tick） */
+    private int backpackRefreshTicks = 40;
+
     private static void applyLimitPreset() {
         int[] p = LIMIT_PRESETS[limitPresetIndex];
         com.nexy451z.nexcrafttree.core.calculation.RecipeResolver.limitMaxDepth = p[0];
@@ -144,14 +150,19 @@ public class NexCraftTreeScreen extends Screen {
         stationPopupHover = -1;
         stationPopupStage = 0;
         stationPopupGroup = -1;
-        // カテゴリごとにレシピをグループ化（出現順を維持）
+        // 同じ作業名（作業台・加工機種別）ごとにレシピをグループ化（出現順を維持）
         Map<String, List<Integer>> grouped = new LinkedHashMap<>();
         for (int i = 0; i < node.alternativeRecipes.size(); i++) {
             PlannedRecipe alt = node.alternativeRecipes.get(i);
-            String uid = (alt.getStation() != null && alt.getStation().getCategoryUid() != null)
-                    ? alt.getStation().getCategoryUid()
-                    : ("station" + i);
-            grouped.computeIfAbsent(uid, k -> new ArrayList<>()).add(i);
+            String name = (alt.getStation() != null && alt.getStation().getDisplayName() != null)
+                    ? alt.getStation().getDisplayName().getString()
+                    : null;
+            if (name == null || name.isEmpty()) {
+                name = (alt.getStation() != null && alt.getStation().getCategoryUid() != null)
+                        ? alt.getStation().getCategoryUid()
+                        : ("station" + i);
+            }
+            grouped.computeIfAbsent(name, k -> new ArrayList<>()).add(i);
         }
         stationPopupGroups = new ArrayList<>(grouped.values());
         int visible = Math.min(popupCurrentRowCount(), POPUP_MAX_ROWS);
@@ -211,6 +222,7 @@ public class NexCraftTreeScreen extends Screen {
 
         UnifiedStockSnapshot snapshot = new UnifiedStockSnapshot();
         snapshot.addProvider(new PlayerInventoryStock(mc.player));
+        snapshot.addProvider(new com.nexy451z.nexcrafttree.core.stock.BackpackStockProvider());
         snapshot.addProvider(com.nexy451z.nexcrafttree.core.stock.StaticStockProvider.of(
                 "refinedstorage", com.nexy451z.nexcrafttree.integration.refinedstorage.RefinedStorageStock.captureEntries()));
         snapshot.addProvider(com.nexy451z.nexcrafttree.core.stock.StaticStockProvider.of(
@@ -373,6 +385,42 @@ public class NexCraftTreeScreen extends Screen {
         if (debounceTicks > 0 && --debounceTicks == 0) {
             recompute();
         }
+        // バックパック在庫の定期リフレッシュ（クラフト等で中身が変わっても追従できるように）
+        if (backpackRefreshTicks > 0 && --backpackRefreshTicks == 0) {
+            requestBackpackStockIfNeeded(Minecraft.getInstance());
+            backpackRefreshTicks = 100;
+        }
+    }
+
+    /** バックパック内の在庫をサーバーへ問い合わせる（3秒スロットル、SB未導入時は何もしない） */
+    private static void requestBackpackStockIfNeeded(Minecraft mc) {
+        try {
+            if (mc == null || mc.player == null || mc.level == null) return;
+            if (!com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge.isAvailable()) return;
+            if (com.nexy451z.nexcrafttree.integration.sophisticatedbackpacks.BackpackBridge.backpackStacks(mc.player).isEmpty()) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (now - lastBackpackRequestMs < 3000L) return;
+            lastBackpackRequestMs = now;
+            NexCraftTreeNetwork.sendBackpackStockRequest();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** バックパック在庫の同期結果が変化した時に呼ばれる */
+    public void onBackpackStockUpdated() {
+        if (Minecraft.getInstance().screen == this) {
+            recompute();
+        }
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        if (activeScreen == this) {
+            activeScreen = null;
+        }
     }
 
     private void changeQuantity(long newQty) {
@@ -445,10 +493,14 @@ public class NexCraftTreeScreen extends Screen {
         // （バックグラウンド計算がRS/AE2のライブデータを直接触らないようにする）
         UnifiedStockSnapshot snapshot = new UnifiedStockSnapshot();
         snapshot.addProvider(new PlayerInventoryStock(mc.player));
+        snapshot.addProvider(new com.nexy451z.nexcrafttree.core.stock.BackpackStockProvider());
         snapshot.addProvider(com.nexy451z.nexcrafttree.core.stock.StaticStockProvider.of(
                 "refinedstorage", com.nexy451z.nexcrafttree.integration.refinedstorage.RefinedStorageStock.captureEntries()));
         snapshot.addProvider(com.nexy451z.nexcrafttree.core.stock.StaticStockProvider.of(
                 "ae2", com.nexy451z.nexcrafttree.integration.ae2.Ae2Stock.captureEntries()));
+
+        // Sophisticated Backpacks の中身はサーバー側SavedDataにあるため、同期要求を発行する（3秒スロットル）
+        requestBackpackStockIfNeeded(mc);
 
         final int seq = ++recomputeSeq;
         final net.minecraft.world.level.Level level = mc.level;
@@ -613,6 +665,8 @@ public class NexCraftTreeScreen extends Screen {
     @Override
     protected void init() {
         clearWidgets();
+        activeScreen = this;
+        backpackRefreshTicks = 40;
         int winWidth = Math.min(width - 20, 520);
         int winHeight = Math.min(height - 20, 300);
         int winX = (width - winWidth) / 2;
@@ -1103,12 +1157,19 @@ public class NexCraftTreeScreen extends Screen {
                 tooltip.add(Component.translatable("gui.nexcrafttree.tt.station.category", st.getCategoryUid()));
             }
             if (node.alternativeRecipes.size() > 1) {
-                tooltip.add(Component.translatable("gui.nexcrafttree.tt.station.switch", node.alternativeRecipes.size()));
+                // 同じ作業名（作業台・加工機種別）ごとにまとめて1行で表示する
+                Map<String, Integer> byStation = new LinkedHashMap<>();
                 for (int ai = 0; ai < node.alternativeRecipes.size(); ai++) {
                     PlannedRecipe alt = node.alternativeRecipes.get(ai);
-                    boolean isCur = (ai == node.selectedRecipeIndex);
+                    String nm = (alt.getStation() != null) ? alt.getStation().getDisplayName().getString() : "?";
+                    byStation.merge(nm, 1, Integer::sum);
+                }
+                tooltip.add(Component.translatable("gui.nexcrafttree.tt.station.switch", byStation.size()));
+                String currentName = (node.station != null) ? node.station.getDisplayName().getString() : null;
+                for (Map.Entry<String, Integer> e : byStation.entrySet()) {
+                    boolean isCur = e.getKey().equals(currentName);
                     String prefix = isCur ? " §a✔ " : " §7 - ";
-                    tooltip.add(Component.literal(prefix + alt.getStation().getDisplayName().getString() + " (" + alt.getCategoryTitle().getString() + ")"));
+                    tooltip.add(Component.literal(prefix + e.getKey() + " ×" + e.getValue()));
                 }
             } else {
                 tooltip.add(Component.translatable("gui.nexcrafttree.tt.station.single"));
