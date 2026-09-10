@@ -1,5 +1,7 @@
 # NexCraftTree
 
+![NexCraftTree](logo.png)
+
 A crafting tree planner mod for **Minecraft 1.21.1** with **NeoForge 21.1.x**.
 Hover over any item and open a full crafting tree (AE2-style): it shows what you already own, what you need to craft, and what you are missing — across your inventory, Refined Storage, and Applied Energistics 2. Then craft everything with one click.
 
