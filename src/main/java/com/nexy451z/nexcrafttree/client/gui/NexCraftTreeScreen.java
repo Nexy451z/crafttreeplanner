@@ -501,7 +501,14 @@ public class NexCraftTreeScreen extends Screen {
         if (node == null) return;
         if (!node.alternativeRecipes.isEmpty()
                 && node.selectedRecipeIndex >= 0 && node.selectedRecipeIndex < node.alternativeRecipes.size()) {
-            out.put(pathKey, node.alternativeRecipes.get(node.selectedRecipeIndex).getId());
+            com.nexy451z.nexcrafttree.core.calculation.PlannedRecipe selected =
+                    node.alternativeRecipes.get(node.selectedRecipeIndex);
+            // 情報カテゴリ（村人取引・クエスト・ドロップ等）は引き継がない（最底辺カテゴリを固定選択にしない）
+            boolean info = selected.getStation() != null
+                    && RecipeResolver.isInfoCategoryUid(selected.getStation().getCategoryUid());
+            if (!info) {
+                out.put(pathKey, selected.getId());
+            }
         }
         for (int i = 0; i < node.children.size(); i++) {
             CraftingTreeNode child = node.children.get(i);

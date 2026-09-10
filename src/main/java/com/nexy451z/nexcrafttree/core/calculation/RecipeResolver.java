@@ -847,34 +847,43 @@ public class RecipeResolver {
         });
     }
 
+    /**
+     * 候補の優先度スコア。
+     * 階層（tier × 100,000）で大枠を決め、その中で小さいボーナス/ペナルティを加える。
+     *  tier 4: 作業台クラフト（基本の最優先）
+     *  tier 3: 実行可能な加工機レシピ（RecipeHolder持ち）
+     *  tier 1: 実行不能なラッパーレシピ（サーバーに実体なし）
+     *  tier 0: 情報カテゴリ（村人の取引・クエスト・ドロップ等）＝最底辺
+     * 設備スロットを固定した場合のみ +150,000（1段階超え）でその設備を最優先にできる。
+     */
     private static int calculateCandidateScore(
             PlannedRecipe recipe,
             ItemStack target,
             @Nullable ItemStack activeWorkstation,
             @Nullable UnifiedStockSnapshot stock
     ) {
-        int score = 0;
-        // 0. サーバー側で実行可能なレシピ（RecipeHolder持ち）を優先。
-        // JEIの取引・クエスト・ドロップ等のラッパーレシピはサーバーに実体がなく直接作成不可のため、大きく減点する
-        if (recipe.getRecipeHolder() != null) {
-            score += 80;
+        String uid = recipe.getStation().getCategoryUid() == null
+                ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
+
+        int tier;
+        if (demoteInfoCategories() && isInfoCategoryUid(uid)) {
+            // 村人の取引(JER等)・クエスト・ドロップ・ギフト等は実行不能かつ情報目的なので最底辺
+            tier = 0;
+        } else if (recipe.getStation().isCraftingTable()) {
+            // 作業台クラフトを基本の最優先にする
+            tier = 4;
+        } else if (recipe.getRecipeHolder() != null) {
+            tier = 3;
         } else {
-            score -= 600;
+            tier = 1;
         }
-        // 1a. プレイヤーが直接実行できない情報カテゴリ（村人の取引・クエスト・ドロップ等）は大きく減点
-        if (demoteInfoCategories()) {
-            String uid = recipe.getStation().getCategoryUid() == null ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
-            if (uid.contains("trade") || uid.contains("villag") || uid.contains("wander") || uid.contains("merchant")
-                    || uid.contains("quest") || uid.contains("loot") || uid.contains("drop")
-                    || uid.contains("gift") || uid.contains("barter") || uid.contains("reward")) {
-                score -= 600;
-            }
-        }
-        // 1. アクティブスロットにセットされた設備と一致する場合: +1000
+        int score = tier * 100_000;
+
+        // アクティブスロットにセットされた設備と一致する場合: 1段階を超えて最優先（ユーザーの明示指定）
         if (activeWorkstation != null && !activeWorkstation.isEmpty() && recipe.getStation().matches(activeWorkstation)) {
-            score += 1000;
+            score += 150_000;
         }
-        // 2. プレイヤー手持ち/RSにその設備が存在する場合: +500
+        // プレイヤー手持ち/RSにその設備が存在する場合: +500
         if (stock != null) {
             try {
                 if (stock.getTotal(recipe.getStation().getIcon()) > 0) {
@@ -883,11 +892,7 @@ public class RecipeResolver {
             } catch (Throwable ignored) {
             }
         }
-        // 3. 作業台レシピ: +200（基本クラフトを優先）
-        if (recipe.getStation().isCraftingTable()) {
-            score += 200;
-        }
-        // 4. 材料が在庫にあるか: +50 per ingredient
+        // 材料が在庫にあるか: +50 per ingredient
         if (stock != null) {
             for (Ingredient ing : recipe.getIngredients()) {
                 ItemStack[] items = ing.getItems();
@@ -902,8 +907,8 @@ public class RecipeResolver {
             }
         }
 
-        // 5. 逆変換・解体レシピ（例: 鉄ブロック -> 鉄インゴットx9）のペナルティ
-        // 手持ちやRSに在庫がない場合、持っていない圧縮ブロックをわざわざクラフトして解体するのは循環の原因になるため大幅減点
+        // 逆変換・解体レシピ（例: 鉄ブロック -> 鉄インゴットx9）のペナルティ
+        // 手持ちやRSに在庫がない場合、持っていない圧縮ブロックをわざわざクラフトして解体するのは循環の原因になるため減点
         if (recipe.getOutputCount() > 1 && recipe.getIngredients().size() == 1) {
             Ingredient singleIng = recipe.getIngredients().get(0);
             ItemStack[] items = singleIng.getItems();
@@ -917,8 +922,7 @@ public class RecipeResolver {
             }
         }
 
-        // 6. 自分自身を材料に要求するレシピ（修理、充電、リサイクル等）のペナルティ
-        // 手持ちに在庫がないのに自分自身を要求するレシピは循環の直接原因
+        // 自分自身を材料に要求するレシピ（修理、充電、リサイクル等）のペナルティ
         if (target != null && !target.isEmpty()) {
             boolean requiresSelf = false;
             for (Ingredient ing : recipe.getIngredients()) {
@@ -942,6 +946,16 @@ public class RecipeResolver {
         }
 
         return score;
+    }
+
+    /** 情報専用カテゴリ（実行不能）のuid判定。jeresourcesはモブドロップ・取引等の情報専用MODのため名前空間ごと底辺扱い */
+    public static boolean isInfoCategoryUid(String uid) {
+        if (uid == null) return false;
+        String lower = uid.toLowerCase(Locale.ROOT);
+        return lower.contains("trade") || lower.contains("villag") || lower.contains("wander") || lower.contains("merchant")
+                || lower.contains("quest") || lower.contains("loot") || lower.contains("drop")
+                || lower.contains("gift") || lower.contains("barter") || lower.contains("reward")
+                || lower.contains("jeresources");
     }
 
     /** 互換用：単一レシピ探索 */
