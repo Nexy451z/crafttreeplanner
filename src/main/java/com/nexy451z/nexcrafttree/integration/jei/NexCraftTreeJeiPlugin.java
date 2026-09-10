@@ -10,17 +10,17 @@ import mezz.jei.api.runtime.IClickableIngredient;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.Optional;
 
 @JeiPlugin
 public class NexCraftTreeJeiPlugin implements IModPlugin, IGlobalGuiHandler {
-    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("nexcrafttree", "jei_plugin");
+    public static final Identifier ID = Identifier.fromNamespaceAndPath("nexcrafttree", "jei_plugin");
 
     @Override
-    public ResourceLocation getPluginUid() {
+    public Identifier getPluginUid() {
         return ID;
     }
 

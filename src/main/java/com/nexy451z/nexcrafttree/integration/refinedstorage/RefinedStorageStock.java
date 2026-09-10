@@ -173,7 +173,7 @@ public class RefinedStorageStock implements IStockProvider {
         }
 
         // 3. レシピのデフォルトテンプレートアイテムをフォールバック候補として追加
-        for (ItemStack st : ing.getItems()) {
+        for (ItemStack st : ItemMatchHelper.ingredientStacks(ing)) {
             try {
                 ItemResource res = ItemResource.ofItemStack(st);
                 if (!slotList.contains(res)) {
@@ -190,7 +190,7 @@ public class RefinedStorageStock implements IStockProvider {
             if (ing.test(stack)) return true;
         } catch (Throwable ignored) {
         }
-        for (ItemStack tmpl : ing.getItems()) {
+        for (ItemStack tmpl : ItemMatchHelper.ingredientStacks(ing)) {
             if (ItemMatchHelper.isStockMatch(stack, tmpl)) {
                 return true;
             }

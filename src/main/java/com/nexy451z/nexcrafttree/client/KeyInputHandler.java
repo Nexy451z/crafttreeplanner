@@ -15,7 +15,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.client.event.InputEvent;
-import net.neoforged.neoforge.client.event.RecipesUpdatedEvent;
+import net.neoforged.neoforge.client.event.RecipesReceivedEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
@@ -30,11 +30,14 @@ public final class KeyInputHandler {
     private KeyInputHandler() {
     }
 
+    public static final KeyMapping.Category KEY_CATEGORY =
+            KeyMapping.Category.register(net.minecraft.resources.Identifier.fromNamespaceAndPath("nexcrafttree", "main"));
+
     public static final KeyMapping OPEN_TREE = new KeyMapping(
             "key.nexcrafttree.open",
             InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_C,
-            "key.categories.nexcrafttree");
+            KEY_CATEGORY);
 
     public static void register(IEventBus modEventBus) {
         try {
@@ -49,9 +52,9 @@ public final class KeyInputHandler {
     }
 
     /** サーバーからレシピ同期・データパック再読込があったらレシピ探索キャッシュを破棄 */
-    private static void onRecipesUpdated(RecipesUpdatedEvent event) {
+    private static void onRecipesUpdated(RecipesReceivedEvent event) {
         try {
-            RecipeResolver.invalidateCaches();
+            RecipeResolver.onRecipesReceived(event.getRecipeMap());
         } catch (Throwable t) {
             NexCraftTree.LOGGER.warn("[NexCraftTree] cache invalidation failed", t);
         }
@@ -67,7 +70,7 @@ public final class KeyInputHandler {
 
     private static void onScreenKey(ScreenEvent.KeyPressed.Pre event) {
         try {
-            if (!OPEN_TREE.matches(event.getKeyCode(), event.getScanCode())) return;
+            if (!OPEN_TREE.matches(event.getKeyEvent())) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null || mc.level == null) return;
             Screen screen = event.getScreen();
@@ -86,7 +89,7 @@ public final class KeyInputHandler {
 
     private static void onScreenMouse(ScreenEvent.MouseButtonPressed.Pre event) {
         try {
-            if (!OPEN_TREE.matchesMouse(event.getButton())) return;
+            if (!OPEN_TREE.matchesMouse(event.getMouseButtonEvent())) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null || mc.level == null) return;
             Screen screen = event.getScreen();

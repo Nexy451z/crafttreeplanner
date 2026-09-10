@@ -3,7 +3,7 @@ package com.nexy451z.nexcrafttree.network;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.List;
@@ -16,13 +16,13 @@ import java.util.List;
  * inputs: クライアント側で判明した材料リスト。サーバー側でレシピの正規入力が取得できない
  *   （getIngredientsが空のMODレシピ等）場合にのみ使用される。
  */
-public record DirectCraftStep(ResourceLocation recipeId, int count, ItemStack stationIcon,
+public record DirectCraftStep(Identifier recipeId, int count, ItemStack stationIcon,
                               ItemStack expectedOutput, List<ItemStack> inputs) {
     /** 1工程あたりの材料リスト上限（コーデックとクライアント検査で共用） */
     public static final int MAX_INPUTS = 16;
 
     public static final StreamCodec<RegistryFriendlyByteBuf, DirectCraftStep> STREAM_CODEC = StreamCodec.composite(
-            ResourceLocation.STREAM_CODEC, DirectCraftStep::recipeId,
+            Identifier.STREAM_CODEC, DirectCraftStep::recipeId,
             ByteBufCodecs.VAR_INT, DirectCraftStep::count,
             ItemStack.OPTIONAL_STREAM_CODEC, DirectCraftStep::stationIcon,
             ItemStack.OPTIONAL_STREAM_CODEC, DirectCraftStep::expectedOutput,

@@ -12,16 +12,20 @@ import mezz.jei.api.recipe.IFocus;
 import mezz.jei.api.recipe.IFocusFactory;
 import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.recipe.RecipeIngredientRole;
-import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
+import mezz.jei.api.recipe.types.IRecipeType;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeMap;
+import net.minecraft.world.item.crafting.display.RecipeDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplayContext;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
@@ -68,7 +72,7 @@ public class RecipeResolver {
     private long deadline = 0;
     private final Map<net.minecraft.world.item.Item, Long> consumed = new HashMap<>();
     /** ノードパス→選択中レシピID。再探索時にユーザーの加工法選択を引き継ぐ */
-    private Map<String, ResourceLocation> recipePreferences = Collections.emptyMap();
+    private Map<String, Identifier> recipePreferences = Collections.emptyMap();
     /** セッション共有のレシピ候補キャッシュ（未ソート・レシピ再読込時にinvalidateCachesで破棄） */
     private static final Map<net.minecraft.world.item.Item, CacheEntry> candidateCache = new ConcurrentHashMap<>();
 
@@ -92,14 +96,14 @@ public class RecipeResolver {
 
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level,
                                     @Nullable ItemStack activeWorkstation, @Nullable ProgressListener progress,
-                                    Map<String, ResourceLocation> preferences) {
+                                    Map<String, Identifier> preferences) {
         progressListener = progress;
         recipePreferences = (preferences == null) ? Collections.emptyMap() : preferences;
         nodeCount = 0;
         consumed.clear();
         deadline = System.currentTimeMillis() + timeoutMs(); // 上限時間で安全に打ち切り
         VirtualStockTracker tracker = new VirtualStockTracker();
-        Deque<ResourceLocation> path = new ArrayDeque<>();
+        Deque<Identifier> path = new ArrayDeque<>();
         String rootPathKey = pathSegment(target, 0);
         CraftingTreeNode result = resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation, rootPathKey);
         if (progressListener != null) {
@@ -110,7 +114,7 @@ public class RecipeResolver {
 
     private CraftingTreeNode resolveRecursive(ItemStack target, long want, UnifiedStockSnapshot stock,
                                               VirtualStockTracker tracker, Level level,
-                                              Deque<ResourceLocation> path, int depth,
+                                              Deque<Identifier> path, int depth,
                                               @Nullable ItemStack activeWorkstation, String nodePathKey) {
         CraftingTreeNode node = new CraftingTreeNode(target, want);
         try {
@@ -118,7 +122,7 @@ public class RecipeResolver {
                 return node;
             }
 
-            ResourceLocation key = VirtualStockTracker.keyOf(target);
+            Identifier key = VirtualStockTracker.keyOf(target);
 
             long deficit;
             if (depth == 0) {
@@ -199,7 +203,7 @@ public class RecipeResolver {
             // ユーザーが以前このパスで選んでいた加工法があれば引き継ぐ
             PlannedRecipe chosen = candidates.get(0);
             int chosenIdx = 0;
-            ResourceLocation preferred = recipePreferences.get(nodePathKey);
+            Identifier preferred = recipePreferences.get(nodePathKey);
             if (preferred != null) {
                 for (int ci = 0; ci < candidates.size(); ci++) {
                     if (preferred.equals(candidates.get(ci).getId())) {
@@ -266,8 +270,8 @@ public class RecipeResolver {
         // switchRecipeはメインスレッド同期実行のため、上限を短めに丸める（UIフリーズ緩和）
         deadline = System.currentTimeMillis() + Math.min(timeoutMs(), 800);
         VirtualStockTracker tracker = new VirtualStockTracker();
-        Deque<ResourceLocation> path = new ArrayDeque<>();
-        ResourceLocation key = VirtualStockTracker.keyOf(node.item);
+        Deque<Identifier> path = new ArrayDeque<>();
+        Identifier key = VirtualStockTracker.keyOf(node.item);
         path.addLast(key);
         String switchPathKey = pathSegment(node.item, 0);
         try {
@@ -299,17 +303,17 @@ public class RecipeResolver {
         if (ingredients == null) return result;
         for (Ingredient ing : ingredients) {
             if (ing == null || ing.isEmpty()) continue;
-            ItemStack[] options;
+            java.util.List<ItemStack> options;
             try {
-                options = ing.getItems();
+                options = ItemMatchHelper.ingredientStacks(ing);
             } catch (Throwable t) {
                 continue;
             }
-            if (options == null || options.length == 0) continue;
+            if (options == null || options.isEmpty()) continue;
 
             // 候補が複数ある場合（タグ指定等）、既に在庫（手持ち・RS・AE2等）にある候補を最優先で選択
-            ItemStack chosen = options[0];
-            if (options.length > 1 && stock != null) {
+            ItemStack chosen = options.get(0);
+            if (options.size() > 1 && stock != null) {
                 for (ItemStack opt : options) {
                     if (opt != null && !opt.isEmpty()) {
                         try {
@@ -359,7 +363,8 @@ public class RecipeResolver {
         List<Ingredient> list = new ArrayList<>();
         if (recipe == null || recipe.value() == null) return list;
         try {
-            List<Ingredient> base = recipe.value().getIngredients();
+            // 26.1では Recipe#getIngredients が廃止され、placementInfo() が全レシピ共通の入力源
+            List<Ingredient> base = recipe.value().placementInfo().ingredients();
             if (base != null) {
                 for (Ingredient ing : base) {
                     if (ing != null && !ing.isEmpty()) {
@@ -423,7 +428,9 @@ public class RecipeResolver {
                     if (input == null) continue;
                     List<ItemStack> stacks = extractStackList(input);
                     if (!stacks.isEmpty()) {
-                        result.add(Ingredient.of(stacks.toArray(new ItemStack[0])));
+                        // 26.1では Ingredient.of(ItemStack) が廃止されたため、ベースアイテムから生成する
+                        // （MOD独自入力APIのフォールバック用途のため、コンポーネント差異は許容する）
+                        result.add(Ingredient.of(stacks.stream().map(ItemStack::getItem)));
                     }
                 } catch (Throwable ignored) {
                 }
@@ -518,11 +525,40 @@ public class RecipeResolver {
     private static volatile Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> vanillaRecipeIndex = null;
     private static volatile Object lastRecipeManager = null;
     private static long lastVanillaIndexGeneration = -1;
+    /** 26.1のクライアントはLevelからレシピ一覧を取得できないため、RecipesReceivedEventで受領したマップを保持する */
+    private static volatile RecipeMap clientRecipeMap = null;
+
+    /** RecipesReceivedEvent（クライアントへのレシピ同期）受信時に呼ぶ */
+    public static void onRecipesReceived(RecipeMap recipeMap) {
+        clientRecipeMap = recipeMap;
+        invalidateCaches();
+    }
+
+    private static Collection<RecipeHolder<?>> currentRecipeSource(Level level) {
+        try {
+            if (level instanceof ServerLevel serverLevel) {
+                return serverLevel.recipeAccess().getRecipes();
+            }
+        } catch (Throwable ignored) {
+        }
+        RecipeMap map = clientRecipeMap;
+        if (map != null) {
+            return map.values();
+        }
+        return null;
+    }
 
     private static void ensureVanillaIndex(Level level) {
         if (level == null) return;
         long gen = CACHE_GENERATION.get();
-        Object currentRm = level.getRecipeManager();
+        Collection<RecipeHolder<?>> source;
+        try {
+            source = currentRecipeSource(level);
+        } catch (Throwable t) {
+            return;
+        }
+        if (source == null) return;
+        Object currentRm = source;
         if (vanillaRecipeIndex != null && lastRecipeManager == currentRm && lastVanillaIndexGeneration == gen) {
             return;
         }
@@ -533,11 +569,10 @@ public class RecipeResolver {
             Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> index = new HashMap<>();
             boolean complete = true;
             try {
-                Collection<RecipeHolder<?>> all = level.getRecipeManager().getRecipes();
-                for (RecipeHolder<?> h : all) {
+                for (RecipeHolder<?> h : source) {
                     if (h == null || h.value() == null) continue;
                     try {
-                        ItemStack out = h.value().getResultItem(level.registryAccess());
+                        ItemStack out = resolveRecipeOutput(h.value(), level);
                         if (out != null && !out.isEmpty()) {
                             index.computeIfAbsent(out.getItem(), k -> new ArrayList<>()).add(h);
                         }
@@ -553,6 +588,22 @@ public class RecipeResolver {
             lastRecipeManager = currentRm;
             lastVanillaIndexGeneration = gen;
         }
+    }
+
+    /** レシピの display()（SlotDisplay）から代表出力スタックを解決する（26.1でgetResultItem廃止のため） */
+    public static ItemStack resolveRecipeOutput(net.minecraft.world.item.crafting.Recipe<?> recipe, Level level) {
+        if (recipe == null) return ItemStack.EMPTY;
+        try {
+            for (RecipeDisplay display : recipe.display()) {
+                if (display == null) continue;
+                ItemStack stack = display.result().resolveForFirstStack(SlotDisplayContext.fromLevel(level));
+                if (stack != null && !stack.isEmpty()) {
+                    return stack;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return ItemStack.EMPTY;
     }
 
     private static List<RecipeHolder<?>> getVanillaRecipesFor(net.minecraft.world.item.Item item) {
@@ -574,7 +625,7 @@ public class RecipeResolver {
     ) {
         if (target == null || target.isEmpty()) return new CandidateFind(Collections.emptyList(), true);
         List<PlannedRecipe> list = new ArrayList<>();
-        Set<ResourceLocation> seenRecipeIds = new HashSet<>();
+        Set<Identifier> seenRecipeIds = new HashSet<>();
         boolean[] complete = {true};
 
         // 1. JEI からの全加工カテゴリ探索
@@ -598,7 +649,7 @@ public class RecipeResolver {
                         complete[0] = false; // カテゴリ間でも期限チェック（プラグイン遅延対策）
                         break;
                     }
-                    RecipeType<?> recipeType = cat.getRecipeType();
+                    IRecipeType<?> recipeType = cat.getRecipeType();
                     String catId = recipeType.getUid().toString();
                     String catPath = recipeType.getUid().getPath().toLowerCase(Locale.ROOT);
                     boolean isCraftingTable = catPath.contains("crafting");
@@ -657,7 +708,7 @@ public class RecipeResolver {
                             break;
                         }
                         RecipeHolder<?> holder = (r instanceof RecipeHolder<?> h) ? h : null;
-                        ResourceLocation recipeId = holder != null ? holder.id() : null;
+                        Identifier recipeId = holder != null ? holder.id().identifier() : null;
                         if (recipeId != null && seenRecipeIds.contains(recipeId)) {
                             continue;
                         }
@@ -670,7 +721,7 @@ public class RecipeResolver {
                             ingredients.addAll(safeIngredients(holder));
                             try {
                                 if (level != null) {
-                                    ItemStack res = holder.value().getResultItem(level.registryAccess());
+                                    ItemStack res = resolveRecipeOutput(holder.value(), level);
                                     if (res != null && !res.isEmpty()) {
                                         outStack = res.copy();
                                         outCount = Math.max(1, res.getCount());
@@ -692,7 +743,7 @@ public class RecipeResolver {
                                                 // JEI表示上の個数（機械レシピの「1操作あたりの消費数」）を保持する
                                                 int copies = Math.max(1, Math.min(64, s.getCount()));
                                                 for (int ci = 0; ci < copies; ci++) {
-                                                    ingredients.add(Ingredient.of(s));
+                                                    ingredients.add(Ingredient.of(s.getItem()));
                                                 }
                                             }
                                         });
@@ -713,7 +764,7 @@ public class RecipeResolver {
                         if (ingredients.isEmpty()) continue;
 
                         if (recipeId == null) {
-                            recipeId = ResourceLocation.fromNamespaceAndPath(recipeType.getUid().getNamespace(),
+                            recipeId = Identifier.fromNamespaceAndPath(recipeType.getUid().getNamespace(),
                                     recipeType.getUid().getPath() + "/" + list.size());
                         }
                         seenRecipeIds.add(recipeId);
@@ -738,7 +789,7 @@ public class RecipeResolver {
 
                     ItemStack out;
                     try {
-                        out = h.value().getResultItem(level.registryAccess());
+                        out = resolveRecipeOutput(h.value(), level);
                     } catch (Throwable ignored) {
                         continue;
                     }
@@ -749,8 +800,8 @@ public class RecipeResolver {
                     if (ingredients.isEmpty()) continue;
 
                     ProcessingStation station = determineStationForVanilla(h);
-                    seenRecipeIds.add(h.id());
-                    list.add(new PlannedRecipe(h.id(), h, station, ingredients, out.copy(), Math.max(1, out.getCount()), station.getDisplayName()));
+                    seenRecipeIds.add(h.id().identifier());
+                    list.add(new PlannedRecipe(h.id().identifier(), h, station, ingredients, out.copy(), Math.max(1, out.getCount()), station.getDisplayName()));
                 }
             } catch (Throwable ignored) {
             }
@@ -798,8 +849,8 @@ public class RecipeResolver {
         sb.append(r.getOutputCount()).append('|');
         for (Ingredient ing : r.getIngredients()) {
             try {
-                ItemStack[] options = ing.getItems();
-                List<String> ids = new ArrayList<>(options.length);
+                List<ItemStack> options = ItemMatchHelper.ingredientStacks(ing);
+                List<String> ids = new ArrayList<>(options.size());
                 for (ItemStack opt : options) {
                     if (opt != null && !opt.isEmpty()) {
                         ids.add(BuiltInRegistries.ITEM.getKey(opt.getItem()).toString());
@@ -895,10 +946,10 @@ public class RecipeResolver {
         // 材料が在庫にあるか: +50 per ingredient
         if (stock != null) {
             for (Ingredient ing : recipe.getIngredients()) {
-                ItemStack[] items = ing.getItems();
-                if (items != null && items.length > 0) {
+                List<ItemStack> items = ItemMatchHelper.ingredientStacks(ing);
+                if (items != null && !items.isEmpty()) {
                     try {
-                        if (stock.getTotal(items[0]) > 0) {
+                        if (stock.getTotal(items.get(0)) > 0) {
                             score += 50;
                         }
                     } catch (Throwable ignored) {
@@ -911,9 +962,9 @@ public class RecipeResolver {
         // 手持ちやRSに在庫がない場合、持っていない圧縮ブロックをわざわざクラフトして解体するのは循環の原因になるため減点
         if (recipe.getOutputCount() > 1 && recipe.getIngredients().size() == 1) {
             Ingredient singleIng = recipe.getIngredients().get(0);
-            ItemStack[] items = singleIng.getItems();
-            if (items != null && items.length > 0) {
-                long inStock = (stock != null) ? stock.getTotal(items[0]) : 0;
+            List<ItemStack> items = ItemMatchHelper.ingredientStacks(singleIng);
+            if (items != null && !items.isEmpty()) {
+                long inStock = (stock != null) ? stock.getTotal(items.get(0)) : 0;
                 if (inStock <= 0) {
                     score -= 5000;
                 } else {
@@ -926,13 +977,11 @@ public class RecipeResolver {
         if (target != null && !target.isEmpty()) {
             boolean requiresSelf = false;
             for (Ingredient ing : recipe.getIngredients()) {
-                ItemStack[] items = ing.getItems();
-                if (items != null) {
-                    for (ItemStack opt : items) {
-                        if (ItemStack.isSameItem(opt, target)) {
-                            requiresSelf = true;
-                            break;
-                        }
+                List<ItemStack> items = ItemMatchHelper.ingredientStacks(ing);
+                for (ItemStack opt : items) {
+                    if (ItemStack.isSameItem(opt, target)) {
+                        requiresSelf = true;
+                        break;
                     }
                 }
                 if (requiresSelf) break;

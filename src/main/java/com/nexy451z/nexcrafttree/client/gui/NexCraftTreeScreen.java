@@ -2,6 +2,7 @@ package com.nexy451z.nexcrafttree.client.gui;
 
 import com.nexy451z.nexcrafttree.NexCraftTree;
 import com.nexy451z.nexcrafttree.client.KeyInputHandler;
+import com.nexy451z.nexcrafttree.core.ItemMatchHelper;
 import com.nexy451z.nexcrafttree.core.calculation.CraftingTreeNode;
 import com.nexy451z.nexcrafttree.core.calculation.PlannedRecipe;
 import com.nexy451z.nexcrafttree.core.calculation.ProcessingStation;
@@ -15,10 +16,13 @@ import com.nexy451z.nexcrafttree.integration.refinedstorage.RefinedStorageStock;
 import com.nexy451z.nexcrafttree.network.NexCraftTreeNetwork;
 import com.nexy451z.nexcrafttree.network.DirectCraftStep;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
@@ -452,7 +456,7 @@ public class NexCraftTreeScreen extends Screen {
         final ItemStack target = targetItem.copy();
         final ItemStack ws = slottedWorkstation.copy();
         // 現在のツリーでユーザーが選んでいる加工法をパス単位で引き継ぐ
-        final Map<String, net.minecraft.resources.ResourceLocation> preferences = captureRecipePreferences();
+        final Map<String, net.minecraft.resources.Identifier> preferences = captureRecipePreferences();
 
         computing = true;
         computeStartMs = System.currentTimeMillis();
@@ -483,8 +487,8 @@ public class NexCraftTreeScreen extends Screen {
     }
 
     /** 現在のツリーの「ノードパス→選択レシピID」を収集する（再計算時の選択引継ぎ用） */
-    private Map<String, net.minecraft.resources.ResourceLocation> captureRecipePreferences() {
-        Map<String, net.minecraft.resources.ResourceLocation> out = new HashMap<>();
+    private Map<String, net.minecraft.resources.Identifier> captureRecipePreferences() {
+        Map<String, net.minecraft.resources.Identifier> out = new HashMap<>();
         try {
             CraftingTreeNode currentRoot = this.root;
             if (currentRoot != null) {
@@ -497,7 +501,7 @@ public class NexCraftTreeScreen extends Screen {
     }
 
     private void captureRecipePreferencesRecursive(CraftingTreeNode node, String pathKey,
-                                                   Map<String, net.minecraft.resources.ResourceLocation> out) {
+                                                   Map<String, net.minecraft.resources.Identifier> out) {
         if (node == null) return;
         if (!node.alternativeRecipes.isEmpty()
                 && node.selectedRecipeIndex >= 0 && node.selectedRecipeIndex < node.alternativeRecipes.size()) {
@@ -528,7 +532,7 @@ public class NexCraftTreeScreen extends Screen {
         candidates.add(new ItemStack(Items.SMOKER));
 
         // インベントリ内の加工機・作業台アイテムを収集
-        for (ItemStack invStack : mc.player.getInventory().items) {
+        for (ItemStack invStack : mc.player.getInventory().getNonEquipmentItems()) {
             if (!invStack.isEmpty()) {
                 String idStr = BuiltInRegistries.ITEM.getKey(invStack.getItem()).toString();
                 if (idStr.contains("furnace") || idStr.contains("crafter") || idStr.contains("table")
@@ -685,7 +689,7 @@ public class NexCraftTreeScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partial) {
         int winWidth = Math.min(width - 20, 520);
         int winHeight = Math.min(height - 20, 300);
         int winX = (width - winWidth) / 2;
@@ -727,15 +731,15 @@ public class NexCraftTreeScreen extends Screen {
 
         // 3. ヘッダー要素描画
         if (!targetItem.isEmpty()) {
-            g.renderFakeItem(targetItem, winX + 9, winY + 9);
-            g.renderItemDecorations(font, targetItem, winX + 9, winY + 9, String.valueOf(quantity));
+            g.item(targetItem, winX + 9, winY + 9);
+            g.itemDecorations(font, targetItem, winX + 9, winY + 9, String.valueOf(quantity));
 
             String titleStr = targetItem.getHoverName().getString();
             int maxTitleW = Math.max(60, (amountField != null ? amountField.getX() - 24 : winX + winWidth - 325) - (winX + 30));
             if (font.width(titleStr) > maxTitleW) {
                 titleStr = font.plainSubstrByWidth(titleStr, maxTitleW - 6) + "…";
             }
-            g.drawString(font, titleStr, winX + 30, winY + 13, 0xFFFFFFFF, true);
+            g.text(font, titleStr, winX + 30, winY + 13, 0xFFFFFFFF, true);
         }
 
         // 数量入力欄の背景と境界線描画
@@ -752,10 +756,10 @@ public class NexCraftTreeScreen extends Screen {
         // 4. ツリーリスト描画（クリッピング領域内 ＋ ズーム適用）
         g.enableScissor(contentX, contentY, contentX + contentW, contentY + contentH);
 
-        g.pose().pushPose();
-        g.pose().translate(contentX, contentY, 0);
-        g.pose().scale(zoomScale, zoomScale, 1.0f);
-        g.pose().translate(-contentX, -contentY, 0);
+        g.pose().pushMatrix();
+        g.pose().translate(contentX, contentY);
+        g.pose().scale(zoomScale, zoomScale);
+        g.pose().translate(-contentX, -contentY);
 
         double localMouseX = contentX + (mouseX - contentX) / zoomScale;
         double localMouseY = contentY + (mouseY - contentY) / zoomScale;
@@ -794,8 +798,8 @@ public class NexCraftTreeScreen extends Screen {
                 }
 
                 int iconY = rY + 3;
-                g.renderFakeItem(r.node.item, iconX, iconY);
-                g.renderItemDecorations(font, r.node.item, iconX, iconY, String.valueOf(r.node.requiredAmount));
+                g.item(r.node.item, iconX, iconY);
+                g.itemDecorations(font, r.node.item, iconX, iconY, String.valueOf(r.node.requiredAmount));
 
                 int nameX = iconX + 20;
                 int badgeW = 78;
@@ -811,7 +815,7 @@ public class NexCraftTreeScreen extends Screen {
                 if (font.width(name) > maxNameW) {
                     name = font.plainSubstrByWidth(name, maxNameW - 6) + "…";
                 }
-                g.drawString(font, name, nameX, rY + 7, 0xFFCDD6F4, true);
+                g.text(font, name, nameX, rY + 7, 0xFFCDD6F4, true);
 
                 // 設備ボックス描画
                 int stationBoxY = rY + 3;
@@ -827,10 +831,10 @@ public class NexCraftTreeScreen extends Screen {
 
                 g.fill(stationBoxX, stationBoxY, stationBoxX + stationBoxW, stationBoxY + stationBoxH, isStationHovered ? 0x4489B4FA : 0x22181825);
                 drawBorder(g, stationBoxX, stationBoxY, stationBoxW, stationBoxH, isStationHovered ? 0xFF89B4FA : (hasMultipleRecipes ? 0x8889B4FA : 0x4445475A));
-                g.renderFakeItem(stIcon, stationBoxX + 2, stationBoxY);
+                g.item(stIcon, stationBoxX + 2, stationBoxY);
 
                 if (hasMultipleRecipes) {
-                    g.drawString(font, "⇄", stationBoxX + 20, stationBoxY + 4, isStationHovered ? 0xFFFFFFFF : 0xFF89B4FA, false);
+                    g.text(font, "⇄", stationBoxX + 20, stationBoxY + 4, isStationHovered ? 0xFFFFFFFF : 0xFF89B4FA, false);
                 }
 
                 int badgeBg;
@@ -872,7 +876,7 @@ public class NexCraftTreeScreen extends Screen {
                 int badgeH = 14;
                 g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, badgeBg);
                 drawBorder(g, badgeX, badgeY, badgeW, badgeH, badgeBorder);
-                g.drawCenteredString(font, badgeText, badgeX + badgeW / 2, badgeY + 3, badgeFg);
+                g.centeredText(font, badgeText, badgeX + badgeW / 2, badgeY + 3, badgeFg);
             } else {
                 // ==================== コンパクトモード（アイテム名OFF・美麗ノード表示） ====================
                 int tileX = iconX;
@@ -923,8 +927,8 @@ public class NexCraftTreeScreen extends Screen {
                 drawBorder(g, tileX, tileY, tileW, tileH, isTileHovered ? 0xFFFFFFFF : statusColor);
 
                 // アイコン描画
-                g.renderFakeItem(r.node.item, tileX, tileY);
-                g.renderItemDecorations(font, r.node.item, tileX, tileY, String.valueOf(r.node.requiredAmount));
+                g.item(r.node.item, tileX, tileY);
+                g.itemDecorations(font, r.node.item, tileX, tileY, String.valueOf(r.node.requiredAmount));
 
                 // ミニステータスバッジ
                 int miniX = tileX + 17;
@@ -933,19 +937,19 @@ public class NexCraftTreeScreen extends Screen {
                 int miniH = 12;
                 g.fill(miniX, miniY, miniX + miniW, miniY + miniH, badgeBg);
                 drawBorder(g, miniX, miniY, miniW, miniH, badgeBorder);
-                g.drawCenteredString(font, miniText, miniX + miniW / 2, miniY + 2, badgeFg);
+                g.centeredText(font, miniText, miniX + miniW / 2, miniY + 2, badgeFg);
 
                 // 設備アイコン描画
                 ItemStack stIcon = (r.node.station != null && !r.node.station.getIcon().isEmpty()) ?
                         r.node.station.getIcon() : new ItemStack(Items.CRAFTING_TABLE);
-                g.renderFakeItem(stIcon, stationPartX, tileY);
+                g.item(stIcon, stationPartX, tileY);
                 if (hasMultipleRecipes) {
-                    g.drawString(font, "⇄", stationPartX + 10, tileY, isStationHovered ? 0xFFFFFFFF : 0xFF89B4FA, false);
+                    g.text(font, "⇄", stationPartX + 10, tileY, isStationHovered ? 0xFFFFFFFF : 0xFF89B4FA, false);
                 }
             }
         }
 
-        g.pose().popPose();
+        g.pose().popMatrix();
         g.disableScissor();
 
         // 5. スクロールバー描画
@@ -990,12 +994,12 @@ public class NexCraftTreeScreen extends Screen {
         String wsLabel = tr("gui.nexcrafttree.slot.workstation");
         String outLabel = tr("gui.nexcrafttree.slot.output");
         if (!slottedWorkstation.isEmpty()) {
-            g.renderFakeItem(slottedWorkstation, wsSlotX + 3, wsSlotY + 3);
-            g.renderItemDecorations(font, slottedWorkstation, wsSlotX + 3, wsSlotY + 3);
+            g.item(slottedWorkstation, wsSlotX + 3, wsSlotY + 3);
+            g.itemDecorations(font, slottedWorkstation, wsSlotX + 3, wsSlotY + 3);
         } else {
-            g.drawCenteredString(font, tr("gui.nexcrafttree.slot.workstation_ph"), wsSlotX + 11, wsSlotY + 7, 0x44CDD6F4);
+            g.centeredText(font, tr("gui.nexcrafttree.slot.workstation_ph"), wsSlotX + 11, wsSlotY + 7, 0x44CDD6F4);
         }
-        g.drawString(font, wsLabel, wsSlotX - font.width(wsLabel) - 4, footerTextY, 0xFFA6ADC8, true);
+        g.text(font, wsLabel, wsSlotX - font.width(wsLabel) - 4, footerTextY, 0xFFA6ADC8, true);
 
         // 完成品スロット背景と枠線
         g.fill(outSlotX, outSlotY, outSlotX + outSlotSize, outSlotY + outSlotSize, 0xFF11111B);
@@ -1011,14 +1015,14 @@ public class NexCraftTreeScreen extends Screen {
 
         // 完成品アイコン描画
         if (!outputSlotStack.isEmpty()) {
-            g.renderFakeItem(outputSlotStack, outSlotX + 3, outSlotY + 3);
-            g.renderItemDecorations(font, outputSlotStack, outSlotX + 3, outSlotY + 3, String.valueOf(outputSlotStack.getCount()));
+            g.item(outputSlotStack, outSlotX + 3, outSlotY + 3);
+            g.itemDecorations(font, outputSlotStack, outSlotX + 3, outSlotY + 3, String.valueOf(outputSlotStack.getCount()));
         } else {
-            g.drawCenteredString(font, tr("gui.nexcrafttree.slot.output_ph"), outSlotX + 11, outSlotY + 7, 0x44CDD6F4);
+            g.centeredText(font, tr("gui.nexcrafttree.slot.output_ph"), outSlotX + 11, outSlotY + 7, 0x44CDD6F4);
         }
 
         // 完成品ラベル
-        g.drawString(font, outLabel, outSlotX - font.width(outLabel) - 4, footerTextY, 0xFFA6ADC8, true);
+        g.text(font, outLabel, outSlotX - font.width(outLabel) - 4, footerTextY, 0xFFA6ADC8, true);
 
         // 左側ステータステキスト
         int maxTextW = wsSlotX - font.width(wsLabel) - 16 - (winX + 12);
@@ -1027,20 +1031,20 @@ public class NexCraftTreeScreen extends Screen {
             if (font.width(txt) > maxTextW) {
                 txt = font.plainSubstrByWidth(txt, maxTextW - 6) + "…";
             }
-            g.drawString(font, txt, winX + 12, footerTextY, statusFeedbackColor, true);
+            g.text(font, txt, winX + 12, footerTextY, statusFeedbackColor, true);
         } else if (totalMissingCount == 0) {
-            g.drawString(font, tr("gui.nexcrafttree.status.ready"), winX + 12, footerTextY, 0xFFA6E3A1, true);
+            g.text(font, tr("gui.nexcrafttree.status.ready"), winX + 12, footerTextY, 0xFFA6E3A1, true);
         } else {
             String sumText = tr("gui.nexcrafttree.status.missing_summary",
                     totalMissingKinds, totalMissingCount, totalCraftSteps);
             if (font.width(sumText) > maxTextW) {
                 sumText = font.plainSubstrByWidth(sumText, maxTextW - 6) + "…";
             }
-            g.drawString(font, sumText, winX + 12, footerTextY, 0xFFF38BA8, true);
+            g.text(font, sumText, winX + 12, footerTextY, 0xFFF38BA8, true);
         }
 
         // 7. ウィジェット描画（ボタン等）
-        super.render(g, mouseX, mouseY, partial);
+        super.extractRenderState(g, mouseX, mouseY, partial);
 
         // 探索中プログレスバー（最前面）
         if (computing) {
@@ -1056,7 +1060,7 @@ public class NexCraftTreeScreen extends Screen {
             g.fill(barX + 1, barY + 1, barX + 1 + (barW - 2) * Math.max(6, pct) / 100, barY + 8, barColor);
             drawBorder(g, barX, barY, barW, 9, 0xFF45475A);
             String txt = tr("gui.nexcrafttree.status.searching") + " " + pct + "% (" + (elapsed / 1000) + "s)";
-            g.drawCenteredString(font, txt, winX + winWidth / 2, barY - 10, 0xFFA6ADC8);
+            g.centeredText(font, txt, winX + winWidth / 2, barY - 10, 0xFFA6ADC8);
         }
 
         // 8. ツールチップ描画（最前面）
@@ -1075,7 +1079,7 @@ public class NexCraftTreeScreen extends Screen {
                 tooltip.add(Component.translatable("gui.nexcrafttree.tt.workstation.empty.click"));
                 tooltip.add(Component.translatable("gui.nexcrafttree.tt.workstation.empty.fallback"));
             }
-            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+            g.setComponentTooltipForNextFrame(font, tooltip, mouseX, mouseY);
         } else if (isHoveringOutputSlot) {
             List<Component> tooltip = new ArrayList<>();
             if (!outputSlotStack.isEmpty()) {
@@ -1089,7 +1093,7 @@ public class NexCraftTreeScreen extends Screen {
                 tooltip.add(Component.translatable("gui.nexcrafttree.tt.output.empty.desc"));
                 tooltip.add(Component.translatable("gui.nexcrafttree.tt.output.empty.take"));
             }
-            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+            g.setComponentTooltipForNextFrame(font, tooltip, mouseX, mouseY);
         } else if (currentHoveredStationRow != null && stationPopupNode == null) {
             CraftingTreeNode node = currentHoveredStationRow.node;
             List<Component> tooltip = new ArrayList<>();
@@ -1111,7 +1115,7 @@ public class NexCraftTreeScreen extends Screen {
             }
             String usageKey = RecipeViewerIntegration.getUsageKeyName();
             tooltip.add(Component.translatable("gui.nexcrafttree.tt.station.usage", usageKey));
-            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+            g.setComponentTooltipForNextFrame(font, tooltip, mouseX, mouseY);
         } else if (currentHoveredRow != null) {
             List<Component> tooltip = new ArrayList<>();
             tooltip.add(currentHoveredRow.node.item.getHoverName());
@@ -1147,28 +1151,28 @@ public class NexCraftTreeScreen extends Screen {
             String recipeKey = RecipeViewerIntegration.getRecipeKeyName();
             String usageKey = RecipeViewerIntegration.getUsageKeyName();
             tooltip.add(Component.translatable("gui.nexcrafttree.tt.row.keys", recipeKey, usageKey));
-            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+            g.setComponentTooltipForNextFrame(font, tooltip, mouseX, mouseY);
         } else if (amountField != null && mouseX >= amountField.getX() - 2 && mouseX <= amountField.getX() + amountField.getWidth() + 2
                 && mouseY >= amountField.getY() - 2 && mouseY <= amountField.getY() + amountField.getHeight() + 2) {
             List<Component> tooltip = new ArrayList<>();
             tooltip.add(Component.translatable("gui.nexcrafttree.tt.amount.title", quantity));
             tooltip.add(Component.translatable("gui.nexcrafttree.tt.amount.desc"));
             tooltip.add(Component.translatable("gui.nexcrafttree.tt.amount.hints"));
-            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+            g.setComponentTooltipForNextFrame(font, tooltip, mouseX, mouseY);
         } else if (isHoveringTargetIcon && !targetItem.isEmpty()) {
             List<Component> tooltip = new ArrayList<>();
             tooltip.add(targetItem.getHoverName());
             String recipeKey = RecipeViewerIntegration.getRecipeKeyName();
             String usageKey = RecipeViewerIntegration.getUsageKeyName();
             tooltip.add(Component.translatable("gui.nexcrafttree.tt.row.keys", recipeKey, usageKey));
-            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+            g.setComponentTooltipForNextFrame(font, tooltip, mouseX, mouseY);
         }
 
         // 9. 加工法ポップアップ（全ウィジェット・ツールチップより最前面）
         renderStationPopup(g, mouseX, mouseY);
     }
 
-    private void renderStationPopup(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderStationPopup(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         if (stationPopupNode == null || stationPopupNode.alternativeRecipes.isEmpty()) {
             closeStationPopup();
             return;
@@ -1206,7 +1210,7 @@ public class NexCraftTreeScreen extends Screen {
         if (stationPopupStage != 0) {
             boolean backHovered = (stationPopupHover == -2);
             g.fill(px + 2, py + 2, px + panelW - 2, py + 17, backHovered ? 0x3389B4FA : 0x22181825);
-            g.drawString(font, tr("gui.nexcrafttree.popup.back"), px + 6, py + 6,
+            g.text(font, tr("gui.nexcrafttree.popup.back"), px + 6, py + 6,
                     backHovered ? 0xFFFFFFFF : 0xFF89B4FA, true);
         }
 
@@ -1234,13 +1238,13 @@ public class NexCraftTreeScreen extends Screen {
                 if (font.width(label) > maxLabelW) {
                     label = font.plainSubstrByWidth(label, maxLabelW - 6) + "…";
                 }
-                g.drawString(font, label, px + 5, rowY + 4,
+                g.text(font, label, px + 5, rowY + 4,
                         containsCurrent ? 0xFFA6E3A1 : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4), true);
 
                 // カテゴリを代表する触媒アイコン
                 ItemStack stIcon = rep.getStation().getIcon();
                 if (stIcon != null && !stIcon.isEmpty()) {
-                    g.renderFakeItem(stIcon, px + panelW - 36, rowY);
+                    g.item(stIcon, px + panelW - 36, rowY);
                 }
             } else {
                 // ステージ2: 選択カテゴリ内のレシピ一覧
@@ -1262,22 +1266,22 @@ public class NexCraftTreeScreen extends Screen {
                 int labelColor = isCur ? 0xFFA6E3A1
                         : notExecutable ? 0xFF6C7086
                         : (isHovered ? 0xFFFFFFFF : 0xFFCDD6F4);
-                g.drawString(font, label, px + 5, rowY + 4, labelColor, true);
+                g.text(font, label, px + 5, rowY + 4, labelColor, true);
 
                 // 材料プレビューアイコン（先頭3種）で候補を識別しやすく
                 List<ItemStack> previews = new ArrayList<>(3);
                 for (Ingredient ing : alt.getIngredients()) {
                     if (previews.size() >= 3) break;
                     try {
-                        ItemStack[] options = ing.getItems();
-                        if (options != null && options.length > 0 && options[0] != null && !options[0].isEmpty()) {
-                            previews.add(options[0]);
+                        List<ItemStack> options = ItemMatchHelper.ingredientStacks(ing);
+                        if (options != null && !options.isEmpty() && options.get(0) != null && !options.get(0).isEmpty()) {
+                            previews.add(options.get(0));
                         }
                     } catch (Throwable ignored) {
                     }
                 }
                 for (int pi = 0; pi < previews.size(); pi++) {
-                    g.renderFakeItem(previews.get(pi), px + panelW - 54 + pi * 18, rowY);
+                    g.item(previews.get(pi), px + panelW - 54 + pi * 18, rowY);
                 }
             }
         }
@@ -1328,7 +1332,7 @@ public class NexCraftTreeScreen extends Screen {
             ItemStack expectedOutput = ItemStack.EMPTY;
             try {
                 if (Minecraft.getInstance().level != null) {
-                    ItemStack out = node.recipe.value().getResultItem(Minecraft.getInstance().level.registryAccess());
+                    ItemStack out = RecipeResolver.resolveRecipeOutput(node.recipe.value(), Minecraft.getInstance().level);
                     if (out != null && !out.isEmpty()) {
                         perCraft = Math.max(1, out.getCount());
                         expectedOutput = out.copyWithCount((int) Math.min(64, perCraft));
@@ -1357,12 +1361,15 @@ public class NexCraftTreeScreen extends Screen {
             }
 
             ItemStack stationIcon = (node.station != null) ? node.station.getIcon() : ItemStack.EMPTY;
-            steps.add(new DirectCraftStep(node.recipe.id(), (int) executions, stationIcon, expectedOutput, inputs));
+            steps.add(new DirectCraftStep(node.recipe.id().identifier(), (int) executions, stationIcon, expectedOutput, inputs));
         }
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
         // 加工法ポップアップ: 最優先で処理
         if (stationPopupNode != null) {
             int headerH = popupHeaderH();
@@ -1428,7 +1435,7 @@ public class NexCraftTreeScreen extends Screen {
             if (clickedInside) {
                 amountField.setFocused(true);
                 setFocused(amountField);
-                return amountField.mouseClicked(mouseX, mouseY, button);
+                return amountField.mouseClicked(event, doubleClick);
             } else if (amountField.isFocused()) {
                 amountField.setFocused(false);
                 commitAmountField();
@@ -1605,21 +1612,22 @@ public class NexCraftTreeScreen extends Screen {
             }
         }
 
-        return super.mouseClicked(mouseX, mouseY, button);
+        return super.mouseClicked(event, doubleClick);
     }
 
     @Override
-    public boolean charTyped(char codePoint, int modifiers) {
+    public boolean charTyped(CharacterEvent event) {
         if (this.amountField != null && this.amountField.isFocused()) {
-            if (this.amountField.charTyped(codePoint, modifiers)) {
+            if (this.amountField.charTyped(event)) {
                 return true;
             }
         }
-        return super.charTyped(codePoint, modifiers);
+        return super.charTyped(event);
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(KeyEvent event) {
+        int keyCode = event.key();
         // ポップアップ: ESCで閉じる（画面自体は閉じない）
         if (stationPopupNode != null && keyCode == GLFW.GLFW_KEY_ESCAPE) {
             closeStationPopup();
@@ -1638,7 +1646,7 @@ public class NexCraftTreeScreen extends Screen {
                 commitAmountField();
                 return true;
             }
-            if (this.amountField.keyPressed(keyCode, scanCode, modifiers) || this.amountField.canConsumeInput()) {
+            if (this.amountField.keyPressed(event) || this.amountField.canConsumeInput()) {
                 return true;
             }
         }
@@ -1646,28 +1654,28 @@ public class NexCraftTreeScreen extends Screen {
         // クラフトツリー / JEI / REI レシピ・用途キー
         ItemStack hovered = getHoveredItemStack();
         if (hovered != null && !hovered.isEmpty()) {
-            if (KeyInputHandler.OPEN_TREE.matches(keyCode, scanCode)) {
+            if (KeyInputHandler.OPEN_TREE.matches(event)) {
                 KeyInputHandler.openTree(hovered.copy(), this);
                 return true;
             }
-            if (RecipeViewerIntegration.matchesRecipeKey(keyCode, scanCode)) {
+            if (RecipeViewerIntegration.matchesRecipeKey(event)) {
                 RecipeViewerIntegration.showRecipe(hovered);
                 return true;
             }
-            if (RecipeViewerIntegration.matchesUsageKey(keyCode, scanCode)) {
+            if (RecipeViewerIntegration.matchesUsageKey(event)) {
                 RecipeViewerIntegration.showUsage(hovered);
                 return true;
             }
         }
 
         // Nキー: アイテム名表示のON/OFF切り替え
-        if (keyCode == GLFW.GLFW_KEY_N && !hasControlDown() && !hasShiftDown() && !hasAltDown()) {
+        if (keyCode == GLFW.GLFW_KEY_N && !event.hasControlDown() && !event.hasShiftDown() && !event.hasAltDown()) {
             toggleItemNames();
             return true;
         }
 
         // ズームショートカット: Ctrl + '+' / Ctrl + '-' / Ctrl + '0'
-        if (hasControlDown()) {
+        if (event.hasControlDown()) {
             if (keyCode == GLFW.GLFW_KEY_EQUAL || keyCode == GLFW.GLFW_KEY_KP_ADD) {
                 changeZoom(1);
                 return true;
@@ -1682,7 +1690,7 @@ public class NexCraftTreeScreen extends Screen {
             }
         }
 
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(event);
     }
 
     @Override
@@ -1706,7 +1714,7 @@ public class NexCraftTreeScreen extends Screen {
             return true;
         }
 
-        if (hasControlDown()) {
+        if (Minecraft.getInstance().hasControlDown()) {
             changeZoom(scrollY > 0 ? 1 : -1);
             return true;
         }
@@ -1716,15 +1724,16 @@ public class NexCraftTreeScreen extends Screen {
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) {
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0) {
             isDraggingScrollbar = false;
         }
-        return super.mouseReleased(mouseX, mouseY, button);
+        return super.mouseReleased(event);
     }
 
     @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        double mouseY = event.y();
         if (isDraggingScrollbar && maxScroll > 0) {
             int winHeight = Math.min(height - 20, 300);
             int headerH = 34;
@@ -1736,7 +1745,7 @@ public class NexCraftTreeScreen extends Screen {
             clampScroll();
             return true;
         }
-        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        return super.mouseDragged(event, dragX, dragY);
     }
 
     private void clampScroll() {
@@ -1744,7 +1753,7 @@ public class NexCraftTreeScreen extends Screen {
         if (scrollOffset > maxScroll) scrollOffset = maxScroll;
     }
 
-    private void drawBorder(GuiGraphics g, int x, int y, int w, int h, int color) {
+    private void drawBorder(GuiGraphicsExtractor g, int x, int y, int w, int h, int color) {
         g.fill(x, y, x + w, y + 1, color);
         g.fill(x, y + h - 1, x + w, y + h, color);
         g.fill(x, y + 1, x + 1, y + h - 1, color);

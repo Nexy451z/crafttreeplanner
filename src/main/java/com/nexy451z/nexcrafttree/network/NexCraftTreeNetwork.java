@@ -40,7 +40,7 @@ public class NexCraftTreeNetwork {
     }
 
     public static void sendDirectCraftRequest(ItemStack target, int qty, List<DirectCraftStep> steps, ItemStack slottedWorkstation) {
-        PacketDistributor.sendToServer(new ServerboundExecuteDirectCraftPayload(
+        net.neoforged.neoforge.client.network.ClientPacketDistributor.sendToServer(new ServerboundExecuteDirectCraftPayload(
                 target, qty, steps, (slottedWorkstation != null) ? slottedWorkstation : ItemStack.EMPTY
         ));
     }
@@ -50,7 +50,7 @@ public class NexCraftTreeNetwork {
     }
 
     public static void sendTakeOutputRequest() {
-        PacketDistributor.sendToServer(new ServerboundTakeOutputPayload());
+        net.neoforged.neoforge.client.network.ClientPacketDistributor.sendToServer(new ServerboundTakeOutputPayload());
     }
 }
 

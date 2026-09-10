@@ -1,7 +1,7 @@
 package com.nexy451z.nexcrafttree.core.calculation;
 
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
@@ -16,7 +16,7 @@ import java.util.List;
  * 1つのアイテムに対して複数の加工法（作業台、合金製錬機、高炉等）が存在する場合の選択肢となる。
  */
 public class PlannedRecipe {
-    private final ResourceLocation id;
+    private final Identifier id;
     @Nullable
     private final RecipeHolder<?> recipeHolder;
     private final ProcessingStation station;
@@ -26,7 +26,7 @@ public class PlannedRecipe {
     private final Component categoryTitle;
 
     public PlannedRecipe(
-            ResourceLocation id,
+            Identifier id,
             @Nullable RecipeHolder<?> recipeHolder,
             ProcessingStation station,
             List<Ingredient> ingredients,
@@ -43,7 +43,7 @@ public class PlannedRecipe {
         this.categoryTitle = categoryTitle != null ? categoryTitle : Component.translatable("gui.nexcrafttree.category_default");
     }
 
-    public ResourceLocation getId() {
+    public Identifier getId() {
         return id;
     }
 

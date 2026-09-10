@@ -47,8 +47,8 @@ base {
     archivesName = mod_id
 }
 
-// Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+// Mojang ships Java 25 to end users in 26.1, so mods should target Java 25.
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 
 //minecraft.accessTransformers.file rootProject.file('src/main/resources/META-INF/accesstransformer.cfg')
 //minecraft.accessTransformers.entry public net.minecraft.client.Minecraft textureManager # textureManager
@@ -91,14 +91,7 @@ runs {
     gameTestServer {
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
     }
-
-    data {
-        // example of overriding the workingDirectory set in configureEach above, uncomment if you want to use it
-        // workingDirectory project.file('run-data')
-
-        // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
-        arguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
-    }
+    // 26.1: datagen('data' run type)は未定義のため使用しない（本MODはdatagen不要）
 }
 
 // Sets up a dependency configuration called 'localRuntime'.
@@ -120,9 +113,9 @@ dependencies {
 
     // JEI: compile against the API, optionally run it in the dev client for testing.
     // The mod itself works fine without JEI installed (integration is optional at runtime).
-    compileOnly "mezz.jei:jei-1.21.1-common-api:${jei_version}"
-    compileOnly "mezz.jei:jei-1.21.1-neoforge-api:${jei_version}"
-    localRuntime "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
+    compileOnly "mezz.jei:jei-26.1.2-common-api:${jei_version}"
+    compileOnly "mezz.jei:jei-26.1.2-neoforge-api:${jei_version}"
+    localRuntime "mezz.jei:jei-26.1.2-neoforge:${jei_version}"
 
     // Refined Storage 2: compiled against the full mod jar (covers internal grid classes
     // such as AbstractGridContainerMenu that the published *-api modules do not include).
@@ -189,6 +182,7 @@ publishing {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+    options.compilerArgs += ['-Xmaxerrs', '3000']
 }
 
 // IDEA no longer automatically downloads sources/javadoc jars for dependencies, so we need to explicitly enable the behavior.

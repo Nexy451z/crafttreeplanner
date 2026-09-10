@@ -18,7 +18,7 @@ public class NexCraftTree {
         LOGGER.info("[NexCraftTree] init");
         modContainer.registerConfig(net.neoforged.fml.config.ModConfig.Type.CLIENT, Config.SPEC);
         modEventBus.addListener(com.nexy451z.nexcrafttree.network.NexCraftTreeNetwork::register);
-        if (FMLEnvironment.dist == Dist.CLIENT) {
+        if (FMLEnvironment.getDist() == Dist.CLIENT) {
             KeyInputHandler.register(modEventBus);
         }
     }

@@ -26,7 +26,7 @@ public class PlayerInventoryStock implements IStockProvider {
         try {
             if (player == null || stack == null || stack.isEmpty()) return 0;
             long total = 0;
-            for (ItemStack s : player.getInventory().items) {
+            for (ItemStack s : player.getInventory().getNonEquipmentItems()) {
                 try {
                     if (!s.isEmpty() && ItemMatchHelper.isStockMatch(s, stack)) {
                         total += s.getCount();
@@ -35,14 +35,13 @@ public class PlayerInventoryStock implements IStockProvider {
                     NexCraftTree.LOGGER.debug("[NexCraftTree] inv scan skip: {}", t.toString());
                 }
             }
-            for (ItemStack s : player.getInventory().offhand) {
-                try {
-                    if (!s.isEmpty() && ItemMatchHelper.isStockMatch(s, stack)) {
-                        total += s.getCount();
-                    }
-                } catch (Throwable t) {
-                    NexCraftTree.LOGGER.debug("[NexCraftTree] offhand scan skip: {}", t.toString());
+            try {
+                ItemStack offhand = player.getInventory().getItem(net.minecraft.world.entity.player.Inventory.SLOT_OFFHAND);
+                if (!offhand.isEmpty() && ItemMatchHelper.isStockMatch(offhand, stack)) {
+                    total += offhand.getCount();
                 }
+            } catch (Throwable t) {
+                NexCraftTree.LOGGER.debug("[NexCraftTree] offhand scan skip: {}", t.toString());
             }
             return total;
         } catch (Throwable t) {

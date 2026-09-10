@@ -1,7 +1,7 @@
 package com.nexy451z.nexcrafttree.core.calculation;
 
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -38,11 +38,11 @@ public class VirtualStockTracker {
         return use;
     }
 
-    public static ResourceLocation keyOf(ItemStack stack) {
+    public static Identifier keyOf(ItemStack stack) {
         try {
             return BuiltInRegistries.ITEM.getKey(stack.getItem());
         } catch (Throwable t) {
-            return ResourceLocation.fromNamespaceAndPath("unknown", "unknown");
+            return Identifier.fromNamespaceAndPath("unknown", "unknown");
         }
     }
 }

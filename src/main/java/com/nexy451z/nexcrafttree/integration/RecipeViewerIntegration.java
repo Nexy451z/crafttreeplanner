@@ -171,7 +171,9 @@ public final class RecipeViewerIntegration {
     /**
      * 入力されたキーが JEI / REI のレシピ表示キーと一致するか判定
      */
-    public static boolean matchesRecipeKey(int keyCode, int scanCode) {
+    public static boolean matchesRecipeKey(net.minecraft.client.input.KeyEvent event) {
+        int keyCode = event.key();
+        int scanCode = event.scancode();
         // 1. JEI
         try {
             IJeiRuntime runtime = JeiHover.JeiRuntimeHolder.getRuntime();
@@ -180,7 +182,7 @@ public final class RecipeViewerIntegration {
                 if (keyMappings != null) {
                     IJeiKeyMapping mapping = keyMappings.getShowRecipe();
                     if (mapping != null && !mapping.isUnbound()) {
-                        InputConstants.Key key = InputConstants.getKey(keyCode, scanCode);
+                        InputConstants.Key key = InputConstants.getKey(event);
                         if (mapping.isActiveAndMatches(key)) {
                             return true;
                         }
@@ -210,7 +212,9 @@ public final class RecipeViewerIntegration {
     /**
      * 入力されたキーが JEI / REI の用途表示キーと一致するか判定
      */
-    public static boolean matchesUsageKey(int keyCode, int scanCode) {
+    public static boolean matchesUsageKey(net.minecraft.client.input.KeyEvent event) {
+        int keyCode = event.key();
+        int scanCode = event.scancode();
         // 1. JEI
         try {
             IJeiRuntime runtime = JeiHover.JeiRuntimeHolder.getRuntime();
@@ -219,7 +223,7 @@ public final class RecipeViewerIntegration {
                 if (keyMappings != null) {
                     IJeiKeyMapping mapping = keyMappings.getShowUses();
                     if (mapping != null && !mapping.isUnbound()) {
-                        InputConstants.Key key = InputConstants.getKey(keyCode, scanCode);
+                        InputConstants.Key key = InputConstants.getKey(event);
                         if (mapping.isActiveAndMatches(key)) {
                             return true;
                         }

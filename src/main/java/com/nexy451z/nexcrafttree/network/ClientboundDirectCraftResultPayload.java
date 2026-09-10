@@ -6,7 +6,7 @@ import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -16,7 +16,7 @@ public record ClientboundDirectCraftResultPayload(
         ItemStack resultStack,
         int count
 ) implements CustomPacketPayload {
-    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("nexcrafttree", "direct_craft_result");
+    public static final Identifier ID = Identifier.fromNamespaceAndPath("nexcrafttree", "direct_craft_result");
     public static final Type<ClientboundDirectCraftResultPayload> TYPE = new Type<>(ID);
 
     public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundDirectCraftResultPayload> STREAM_CODEC = StreamCodec.composite(

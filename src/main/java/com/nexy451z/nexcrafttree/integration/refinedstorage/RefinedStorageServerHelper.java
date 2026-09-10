@@ -79,7 +79,7 @@ public class RefinedStorageServerHelper {
             Collection<ResourceAmount> all = storage.getAll();
             if (all == null) return ItemStack.EMPTY;
 
-            ItemStack[] ingOptions = ingredient.getItems();
+            java.util.List<ItemStack> ingOptions = ItemMatchHelper.ingredientStacks(ingredient);
 
             for (ResourceAmount resourceAmount : all) {
                 if (resourceAmount == null || resourceAmount.resource() == null) continue;
@@ -108,6 +108,49 @@ public class RefinedStorageServerHelper {
             }
         } catch (Throwable t) {
             NexCraftTree.LOGGER.warn("[NexCraftTree] Failed to extract item from RS storage", t);
+        }
+
+        return ItemStack.EMPTY;
+    }
+
+    /**
+     * 26.1では Ingredient.of(ItemStack) が廃止されたため、完全一致（同一アイテム+同一コンポーネント）で
+     * RSストレージから1個抽出する。クライアント計算入力（pullExact）用。
+     */
+    public static ItemStack extractSingleExact(ServerPlayer player, ItemStack template) {
+        if (!isRsContainerOpen(player) || template == null || template.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+
+        try {
+            AbstractGridContainerMenu menu = (AbstractGridContainerMenu) player.containerMenu;
+            Grid grid = getGrid(menu);
+            if (grid == null) return ItemStack.EMPTY;
+
+            Storage storage = grid.getItemStorage();
+            if (storage == null) return ItemStack.EMPTY;
+
+            PlayerActor actor = new PlayerActor(player);
+            Collection<ResourceAmount> all = storage.getAll();
+            if (all == null) return ItemStack.EMPTY;
+
+            for (ResourceAmount resourceAmount : all) {
+                if (resourceAmount == null || resourceAmount.resource() == null) continue;
+                if (!(resourceAmount.resource() instanceof ItemResource itemResource)) continue;
+                if (resourceAmount.amount() <= 0) continue;
+
+                ItemStack candidate = itemResource.toItemStack();
+                if (candidate == null || candidate.isEmpty()) continue;
+
+                if (ItemStack.isSameItemSameComponents(candidate, template)) {
+                    long extracted = storage.extract(itemResource, 1L, Action.EXECUTE, actor);
+                    if (extracted > 0) {
+                        return candidate.copyWithCount((int) extracted);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            NexCraftTree.LOGGER.warn("[NexCraftTree] Failed to extract exact item from RS storage", t);
         }
 
         return ItemStack.EMPTY;

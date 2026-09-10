@@ -24,7 +24,7 @@ public class DirectCraftingClientReceiver {
             } else {
                 mc.player.playSound(SoundEvents.VILLAGER_NO, 0.8F, 1.0F);
                 if (payload.message() != null && !payload.message().getString().isEmpty()) {
-                    mc.gui.getChat().addMessage(payload.message());
+                    mc.gui.getChat().addClientSystemMessage(payload.message());
                 }
             }
         });

@@ -21,6 +21,30 @@ public final class ItemMatchHelper {
     }
 
     /**
+     * 26.1では Ingredient#getItems() が廃止されたため、SlotDisplay解決で
+     * レシピ要求アイテムの代表スタック一覧を取得する。解決できない場合は
+     * 保持しているHolderSetからデフォルトスタックを生成するフォールバックを行う。
+     */
+    public static java.util.List<ItemStack> ingredientStacks(net.minecraft.world.item.crafting.Ingredient ing) {
+        java.util.List<ItemStack> out = new java.util.ArrayList<>();
+        if (ing == null || ing.isEmpty()) return out;
+        try {
+            out.addAll(ing.display().resolveForStacks(net.minecraft.util.context.ContextMap.EMPTY));
+        } catch (Throwable ignored) {
+        }
+        if (out.isEmpty()) {
+            try {
+                for (net.minecraft.core.Holder<net.minecraft.world.item.Item> h : ing.getValues()) {
+                    out.add(h.value().getDefaultInstance());
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return out;
+    }
+
+
+    /**
      * 在庫引き当て用のマッチング判定。
      * @param inventoryStack プレイヤー所持またはストレージ内の現物アイテム
      * @param neededStack レシピ側で要求されているアイテム
@@ -53,29 +77,19 @@ public final class ItemMatchHelper {
 
     /**
      * ツールや耐久値を持つアイテム（または消耗可能なアイテム）か判定する。
+     * 26.1以降は武器/防具/ツールがデータ駆動化されTieredItem/DiggerItem等の型が消滅したため、
+     * 「ダメージ値を持つか」で統一的に判定する（全ツール・防具・武器はmax damageを保持する）。
      */
     public static boolean isToolOrDamageable(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         try {
+            if (hasStrictFunctionalComponents(stack)) {
+                return false;
+            }
             if (stack.isDamageableItem() || stack.getMaxDamage() > 0) {
                 return true;
             }
             if (stack.has(DataComponents.DAMAGE) || stack.has(DataComponents.MAX_DAMAGE)) {
-                return true;
-            }
-
-            net.minecraft.world.item.Item item = stack.getItem();
-            if (item instanceof net.minecraft.world.item.TieredItem
-                    || item instanceof net.minecraft.world.item.DiggerItem
-                    || item instanceof net.minecraft.world.item.SwordItem
-                    || item instanceof net.minecraft.world.item.ArmorItem
-                    || item instanceof net.minecraft.world.item.ShearsItem
-                    || item instanceof net.minecraft.world.item.BowItem
-                    || item instanceof net.minecraft.world.item.CrossbowItem
-                    || item instanceof net.minecraft.world.item.FishingRodItem
-                    || item instanceof net.minecraft.world.item.TridentItem
-                    || item instanceof net.minecraft.world.item.FlintAndSteelItem
-                    || item instanceof net.minecraft.world.item.ShieldItem) {
                 return true;
             }
         } catch (Throwable ignored) {

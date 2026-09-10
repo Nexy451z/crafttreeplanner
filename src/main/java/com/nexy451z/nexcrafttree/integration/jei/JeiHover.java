@@ -193,9 +193,9 @@ public final class JeiHover {
                         if (itemStack.isPresent() && !itemStack.get().isEmpty()) {
                             return Optional.of(itemStack.get().copy());
                         }
-                        Optional<IRecipeSlotDrawable> slotOpt = layoutDrawable.getRecipeSlotUnderMouse(mouseX, mouseY);
+                        Optional<mezz.jei.api.gui.inputs.RecipeSlotUnderMouse> slotOpt = layoutDrawable.getSlotUnderMouse(mouseX, mouseY);
                         if (slotOpt.isPresent()) {
-                            IRecipeSlotView slot = slotOpt.get();
+                            IRecipeSlotView slot = slotOpt.get().slot();
                             Optional<ItemStack> displayed = slot.getDisplayedItemStack();
                             if (displayed.isPresent() && !displayed.get().isEmpty()) {
                                 return Optional.of(displayed.get().copy());
