@@ -935,9 +935,9 @@ public class RecipeResolver {
             @Nullable UnifiedStockSnapshot stock
     ) {
         list.sort((a, b) -> {
-            // 第1キー: 作業台レシピが存在するなら常に最優先（設備スロット固定や在庫ボーナスより強い）
-            int groupA = candidateGroupRank(a);
-            int groupB = candidateGroupRank(b);
+            // 第1キー: タグベースのスマート優先（精錬系）→ 作業台 → その他 → 情報カテゴリ
+            int groupA = candidateGroupRank(a, target);
+            int groupB = candidateGroupRank(b, target);
             if (groupA != groupB) {
                 return Integer.compare(groupA, groupB);
             }
@@ -952,13 +952,15 @@ public class RecipeResolver {
 
     /**
      * ソート第1キー。
-     *  0: 作業台クラフト（クラフトレシピがある場合は常に先頭）
+     * -1: タグベースのスマート優先（インゴット等の加工素材 × 精錬系レシピ、材料が鉱石/原石など）
+     *  0: 作業台クラフト
      *  1: その他の加工機・MODレシピ
      *  2: 情報専用カテゴリ（取引・ドロップ等）＝最底辺
      */
-    public static int candidateGroupRank(PlannedRecipe recipe) {
+    public static int candidateGroupRank(PlannedRecipe recipe, ItemStack target) {
         try {
             if (recipe == null || recipe.getStation() == null) return 1;
+            if (isSmartPreferred(recipe, target)) return -1;
             String uid = recipe.getStation().getCategoryUid() == null
                     ? "" : recipe.getStation().getCategoryUid().toLowerCase(Locale.ROOT);
             if (demoteInfoCategories() && isInfoCategoryUid(uid)) return 2;
@@ -966,6 +968,80 @@ public class RecipeResolver {
         } catch (Throwable ignored) {
         }
         return 1;
+    }
+
+    /** 加工素材（インゴット/宝石/ダスト）を表す共通タグ。名前空間は c:（NeoForge共通）と forge:（レガシー）の両方を見る */
+    private static final String[] PROCESSED_TARGET_TAGS = {
+            "c:ingots", "forge:ingots",
+            "c:gems", "forge:gems",
+            "c:dusts", "forge:dusts"
+    };
+
+    /** 天然資源（鉱石/原石/原木ブロック等）を表す共通タグ */
+    private static final String[] RAW_RESOURCE_TAGS = {
+            "c:ores", "forge:ores",
+            "c:raw_materials", "forge:raw_materials",
+            "c:raw_blocks", "forge:raw_blocks"
+    };
+
+    /**
+     * スマート優先: 精錬系（かまど/高炉/燻製器）レシピを上位に置く。
+     * - 対象がインゴット/宝石/ダスト（加工素材タグ）
+     * - または材料に鉱石/原石（天然資源タグ）が含まれる
+     * 例: 鉄インゴット(タグ c:ingots/iron) → 精錬(鉄の原石 c:raw_materials/iron) を自動選択
+     */
+    private static boolean isSmartPreferred(PlannedRecipe recipe, ItemStack target) {
+        try {
+            if (!isCookingRecipe(recipe)) return false;
+            if (stackHasTagPrefix(target, PROCESSED_TARGET_TAGS)) return true;
+            for (Ingredient ing : recipe.getIngredients()) {
+                if (ing == null || ing.isEmpty()) continue;
+                for (ItemStack opt : ItemMatchHelper.ingredientStacks(ing)) {
+                    if (stackHasTagPrefix(opt, RAW_RESOURCE_TAGS)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /** かまど/高炉/燻製器のレシピか（RecipeHolderの型、無ければ設備UIDで判定） */
+    private static boolean isCookingRecipe(PlannedRecipe recipe) {
+        try {
+            RecipeHolder<?> holder = recipe.getRecipeHolder();
+            if (holder != null && holder.value() != null) {
+                net.minecraft.world.item.crafting.RecipeType<?> type = holder.value().getType();
+                return net.minecraft.world.item.crafting.RecipeType.SMELTING.equals(type)
+                        || net.minecraft.world.item.crafting.RecipeType.BLASTING.equals(type)
+                        || net.minecraft.world.item.crafting.RecipeType.SMOKING.equals(type);
+            }
+            String uid = recipe.getStation() == null ? null : recipe.getStation().getCategoryUid();
+            if (uid == null) return false;
+            String u = uid.toLowerCase(Locale.ROOT);
+            return u.startsWith("minecraft:smelting") || u.startsWith("minecraft:blasting") || u.startsWith("minecraft:smoking");
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** アイテムが指定タグ（またはその子タグ。例: c:ingots → c:ingots/iron）を持つか */
+    private static boolean stackHasTagPrefix(ItemStack stack, String[] baseTags) {
+        if (stack == null || stack.isEmpty()) return false;
+        try {
+            for (net.minecraft.tags.TagKey<net.minecraft.world.item.Item> tag
+                    : stack.getItem().builtInRegistryHolder().tags().toList()) {
+                String full = tag.location().toString();
+                for (String base : baseTags) {
+                    if (full.equals(base) || full.startsWith(base + "/")) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 
     /**
