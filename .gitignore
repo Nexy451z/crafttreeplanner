@@ -38,3 +38,8 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Port tooling (local logs) ###
+build-*.log
+port-errors*.txt
+port-symbols.txt
