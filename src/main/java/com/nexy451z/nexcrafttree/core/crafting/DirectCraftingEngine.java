@@ -157,7 +157,7 @@ public class DirectCraftingEngine {
                 if (!isStationAvailable(player, stationIcon, slottedWorkstation)) {
                     String stationName = stationIcon.getHoverName().getString();
                     rollback(player, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
-                            intermediatePool, producedRemainders,
+                            intermediatePool, producedRemainders, ItemStack.EMPTY,
                             Component.translatable("msg.nexcrafttree.station_missing", stationName));
                     return;
                 }
@@ -174,7 +174,7 @@ public class DirectCraftingEngine {
             Optional<RecipeHolder<?>> recipeOpt = level.getRecipeManager().byKey(recipeId);
             if (recipeOpt.isEmpty()) {
                 rollback(player, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
-                        intermediatePool, producedRemainders,
+                        intermediatePool, producedRemainders, finalOutput,
                         Component.translatable("msg.nexcrafttree.recipe_not_found", String.valueOf(recipeId)));
                 return;
             }
@@ -182,13 +182,29 @@ public class DirectCraftingEngine {
             Recipe<?> rawRecipe = recipeOpt.get().value();
             boolean isFinalStep = (stepIdx == steps.size() - 1);
 
-            for (int exec = 0; exec < executions; exec++) {
-                ItemStack assembled = ItemStack.EMPTY;
+            // 設備種別はサーバー側のレシピ型から検証する（クライアント送信のstationIconだけを信じない）。
+            // 既知のバニラ型は必須設備が確定、それ以外（MOD機械等）は空でなければ許可。
+            if (!stationMatchesRecipe(rawRecipe, step.stationIcon())) {
+                rollback(player, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
+                        intermediatePool, producedRemainders, finalOutput,
+                        Component.translatable("msg.nexcrafttree.station_missing",
+                                (step.stationIcon() != null && !step.stationIcon().isEmpty())
+                                        ? step.stationIcon().getHoverName().getString()
+                                        : "?"));
+                return;
+            }
 
-                // この実行1回分で引き抜いた素材。完了したら消費扱い、失敗時のみロールバック対象
-                List<ItemStack> execExtractedPlayer = new ArrayList<>();
-                List<ItemStack> execExtractedRs = new ArrayList<>();
-                List<ItemStack> execPoolTaken = new ArrayList<>();
+                for (int exec = 0; exec < executions; exec++) {
+                    ItemStack assembled = ItemStack.EMPTY;
+
+                    // この実行1回分で引き抜いた素材。完了したら消費扱い、失敗時のみロールバック対象
+                    List<ItemStack> execExtractedPlayer = new ArrayList<>();
+                    List<ItemStack> execExtractedRs = new ArrayList<>();
+                    List<ItemStack> execPoolTaken = new ArrayList<>();
+                    // この実行1回分の残余（バケツ等）。出力が確定してから全体リストへマージする
+                    // （失敗時は元アイテムごと返すため残余を返すと二重還元になる）
+                    List<ItemStack> execRemainders = new ArrayList<>();
+
 
                 if (rawRecipe instanceof CraftingRecipe craftingRecipe) {
                     CraftingInput craftingInput;
@@ -204,7 +220,7 @@ public class DirectCraftingEngine {
 
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                             if (extracted.isEmpty()) {
-                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
                                         Component.translatable("msg.nexcrafttree.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
@@ -221,7 +237,7 @@ public class DirectCraftingEngine {
 
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                             if (extracted.isEmpty()) {
-                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
                                         Component.translatable("msg.nexcrafttree.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
@@ -232,12 +248,12 @@ public class DirectCraftingEngine {
 
                     assembled = craftingRecipe.assemble(craftingInput, level.registryAccess());
                     if (assembled.isEmpty()) {
-                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
                                 Component.translatable("msg.nexcrafttree.assemble_failed", String.valueOf(recipeId)));
                         return;
                     }
 
-                    // 残余アイテム（バケツ等）の回収
+                    // 残余アイテム（バケツ等）の回収（出力確定後なので全体リストへ直行）
                     NonNullList<ItemStack> remainders = craftingRecipe.getRemainingItems(craftingInput);
                     for (ItemStack rem : remainders) {
                         if (!rem.isEmpty()) {
@@ -264,14 +280,14 @@ public class DirectCraftingEngine {
                             for (int k = 0; k < needCount; k++) {
                                 ItemStack extracted = pullExact(player, template, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                                 if (extracted.isEmpty()) {
-                                    rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                                    rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
                                             Component.translatable("msg.nexcrafttree.ingredient_missing", String.valueOf(recipeId)));
                                     return;
                                 }
                                 inputItems.add(extracted);
                                 ItemStack remainder = extracted.getCraftingRemainingItem();
                                 if (!remainder.isEmpty()) {
-                                    producedRemainders.add(remainder);
+                                    execRemainders.add(remainder);
                                 }
                             }
                         }
@@ -280,7 +296,7 @@ public class DirectCraftingEngine {
                             if (ing.isEmpty()) continue;
                             ItemStack extracted = pullIngredient(player, ing, intermediatePool, execPoolTaken, execExtractedPlayer, execExtractedRs);
                             if (extracted.isEmpty()) {
-                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                                rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
                                         Component.translatable("msg.nexcrafttree.ingredient_missing", String.valueOf(recipeId)));
                                 return;
                             }
@@ -288,9 +304,16 @@ public class DirectCraftingEngine {
 
                             ItemStack remainder = extracted.getCraftingRemainingItem();
                             if (!remainder.isEmpty()) {
-                                producedRemainders.add(remainder);
+                                execRemainders.add(remainder);
                             }
                         }
+                    }
+
+                    // 入力ゼロのまま assemble に進むと無消費のアイテム生成になるため一律で実行不可
+                    if (inputItems.isEmpty()) {
+                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
+                                Component.translatable("msg.nexcrafttree.ingredient_missing", String.valueOf(recipeId)));
+                        return;
                     }
 
                     // 1. SingleRecipeInput での assemble 試行（かまど、高炉、石切機、Mekanism item系等）
@@ -317,10 +340,12 @@ public class DirectCraftingEngine {
                     }
 
                     if (assembled.isEmpty()) {
-                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders,
+                        rollback(player, execExtractedPlayer, execExtractedRs, execPoolTaken, intermediatePool, producedRemainders, finalOutput,
                                 Component.translatable("msg.nexcrafttree.process_failed", String.valueOf(recipeId)));
                         return;
                     }
+                    // 出力が確定した時点で残余を確定させる
+                    producedRemainders.addAll(execRemainders);
                 }
 
                 if (isFinalStep) {
@@ -591,6 +616,7 @@ public class DirectCraftingEngine {
      * extractedFromPlayer / extractedFromRs: 失敗した実行で引き抜いた未消費素材 → 所持品/RSに返す
      * intermediatePool: 未使用の中間品 → 所持品に返す（先行工程の実物換算）
      * producedRemainders: 生成済みの残余（バケツ等） → 所持品に返す
+     * finalOutputRefund: 失敗前に完成していた最終品 → 所持品に返す（先行実行分の損失防止）
      * 先行工程の素材は中間品に変換済みのため返却せず、二重還元を防ぐ
      */
     private static void rollback(
@@ -600,6 +626,7 @@ public class DirectCraftingEngine {
             List<ItemStack> poolTaken,
             List<ItemStack> intermediatePool,
             List<ItemStack> producedRemainders,
+            ItemStack finalOutputRefund,
             Component message
     ) {
         if (poolTaken != null && !poolTaken.isEmpty()) {
@@ -636,39 +663,68 @@ public class DirectCraftingEngine {
                 }
             }
         }
+        if (finalOutputRefund != null && !finalOutputRefund.isEmpty()) {
+            if (!player.getInventory().add(finalOutputRefund)) {
+                player.drop(finalOutputRefund, false);
+            }
+        }
         PacketDistributor.sendToPlayer(player, new ClientboundDirectCraftResultPayload(
                 false, message, ItemStack.EMPTY, 0
         ));
     }
 
+    /**
+     * レシピ型から要求される設備を検証する（クライアントのstationIconはヒントに過ぎない）。
+     * 既知のバニラ型は必須設備が確定。それ以外（MOD機械・特殊レシピ等）は空でなければ許可。
+     */
+    private static boolean stationMatchesRecipe(Recipe<?> recipe, ItemStack stationIcon) {
+        if (stationIcon == null || stationIcon.isEmpty()) return false;
+        if (recipe instanceof CraftingRecipe) return stationIcon.is(Items.CRAFTING_TABLE);
+        if (recipe instanceof SmeltingRecipe) return stationIcon.is(Items.FURNACE);
+        if (recipe instanceof BlastingRecipe) return stationIcon.is(Items.BLAST_FURNACE);
+        if (recipe instanceof SmokingRecipe) return stationIcon.is(Items.SMOKER);
+        if (recipe instanceof StonecutterRecipe) return stationIcon.is(Items.STONECUTTER);
+        if (recipe instanceof SmithingRecipe) return stationIcon.is(Items.SMITHING_TABLE);
+        return true;
+    }
+
     private static boolean isStationAvailable(ServerPlayer player, ItemStack stationIcon, ItemStack slottedWorkstation) {
         if (stationIcon == null || stationIcon.isEmpty() || stationIcon.is(Items.CRAFTING_TABLE)) return true;
 
-        if (slottedWorkstation != null && !slottedWorkstation.isEmpty()) {
-            if (ItemStack.isSameItem(stationIcon, slottedWorkstation) || ItemMatchHelper.isStockMatch(stationIcon, slottedWorkstation)) {
+        // スロット設備で満たす場合、その設備を実際に所持していることを検証する
+        // （クライアントが未所持の設備を装って申告するのを防ぐ）
+        if (slottedWorkstation != null && !slottedWorkstation.isEmpty()
+                && (ItemStack.isSameItem(stationIcon, slottedWorkstation) || ItemMatchHelper.isStockMatch(stationIcon, slottedWorkstation))) {
+            if (playerActuallyOwns(player, slottedWorkstation)) {
                 return true;
             }
+            return false;
         }
 
-        for (ItemStack invStack : player.getInventory().items) {
-            if (!invStack.isEmpty() && (ItemStack.isSameItem(stationIcon, invStack) || ItemMatchHelper.isStockMatch(stationIcon, invStack))) {
-                return true;
-            }
-        }
-        for (ItemStack offStack : player.getInventory().offhand) {
-            if (!offStack.isEmpty() && (ItemStack.isSameItem(stationIcon, offStack) || ItemMatchHelper.isStockMatch(stationIcon, offStack))) {
-                return true;
-            }
-        }
-
-        if (RefinedStorageServerHelper.isRsContainerOpen(player)) {
-            if (RefinedStorageServerHelper.hasItem(player, stationIcon)) {
-                return true;
-            }
+        if (playerActuallyOwns(player, stationIcon)) {
+            return true;
         }
 
         return false;
     }
+
+    private static boolean playerActuallyOwns(ServerPlayer player, ItemStack target) {
+        for (ItemStack invStack : player.getInventory().items) {
+            if (!invStack.isEmpty() && (ItemStack.isSameItem(target, invStack) || ItemMatchHelper.isStockMatch(target, invStack))) {
+                return true;
+            }
+        }
+        for (ItemStack offStack : player.getInventory().offhand) {
+            if (!offStack.isEmpty() && (ItemStack.isSameItem(target, offStack) || ItemMatchHelper.isStockMatch(target, offStack))) {
+                return true;
+            }
+        }
+        if (RefinedStorageServerHelper.isRsContainerOpen(player) && RefinedStorageServerHelper.hasItem(player, target)) {
+            return true;
+        }
+        return false;
+    }
 }
+
 
 

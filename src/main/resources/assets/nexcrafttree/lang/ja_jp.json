@@ -94,14 +94,6 @@
   "msg.nexcrafttree.cooldown": "§c[NexCraftTree] 連続実行は少し待ってください。",
   "msg.nexcrafttree.done": "§a✔ クラフト完了！ 完成品スロットから回収できます",
 
-  "msg.nexcrafttree.seq.missing": "§c[NexCraftTree] 不足素材があるため一括作成できません。素材を揃えてください。",
-  "msg.nexcrafttree.seq.no_steps": "§e[NexCraftTree] 作成が必要なクラフト工程がありません（すべて在庫にあります）",
-  "msg.nexcrafttree.seq.need_container": "§c[NexCraftTree] 作業台またはRSクラフトグリッドを開いてから[作成]を押してください",
-  "msg.nexcrafttree.seq.started": "§a[NexCraftTree] 自動クラフトを開始します（全 %s 工程）...",
-  "msg.nexcrafttree.seq.progress": "§e[NexCraftTree] クラフト中 (%s/%s): %s",
-  "msg.nexcrafttree.seq.done": "§a✔ [NexCraftTree] 一括クラフト完了！ %s を作成しました！",
-  "msg.nexcrafttree.seq.cancel_prefix": "§c[NexCraftTree] %s",
-  "msg.nexcrafttree.seq.cancel_closed": "画面が閉じられたためクラフトを中断しました",
   "msg.nexcrafttree.seq.cancel_transfer": "クラフト素材の配置が完了しませんでした（素材が不足しているか、グリッドへの転送が完了していません）"
 }
 

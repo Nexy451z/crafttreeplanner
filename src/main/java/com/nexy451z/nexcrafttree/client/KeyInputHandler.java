@@ -34,7 +34,7 @@ public final class KeyInputHandler {
             "key.nexcrafttree.open",
             InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_C,
-            "key.categories.NexCraftTree");
+            "key.categories.nexcrafttree");
 
     public static void register(IEventBus modEventBus) {
         try {

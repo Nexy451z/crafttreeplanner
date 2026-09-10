@@ -234,7 +234,8 @@ public class RecipeResolver {
         node.children.clear();
         nodeCount = 0;
         consumed.clear();
-        deadline = System.currentTimeMillis() + timeoutMs();
+        // switchRecipeはメインスレッド同期実行のため、上限を短めに丸める（UIフリーズ緩和）
+        deadline = System.currentTimeMillis() + Math.min(timeoutMs(), 800);
         VirtualStockTracker tracker = new VirtualStockTracker();
         Deque<ResourceLocation> path = new ArrayDeque<>();
         ResourceLocation key = VirtualStockTracker.keyOf(node.item);
@@ -498,6 +499,7 @@ public class RecipeResolver {
                 return;
             }
             Map<net.minecraft.world.item.Item, List<RecipeHolder<?>>> index = new HashMap<>();
+            boolean complete = true;
             try {
                 Collection<RecipeHolder<?>> all = level.getRecipeManager().getRecipes();
                 for (RecipeHolder<?> h : all) {
@@ -510,8 +512,11 @@ public class RecipeResolver {
                     } catch (Throwable ignored) {
                     }
                 }
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                // 再読込と競合した場合は部分的なインデックスを公開しない（次回リトライ）
+                complete = false;
             }
+            if (!complete) return;
             vanillaRecipeIndex = index;
             lastRecipeManager = currentRm;
             lastVanillaIndexGeneration = gen;

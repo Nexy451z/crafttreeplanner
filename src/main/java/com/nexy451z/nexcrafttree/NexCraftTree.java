@@ -11,7 +11,7 @@ import org.slf4j.Logger;
 
 @Mod(NexCraftTree.MODID)
 public class NexCraftTree {
-    public static final String MODID = "NexCraftTree";
+    public static final String MODID = "nexcrafttree";
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public NexCraftTree(IEventBus modEventBus, ModContainer modContainer) {

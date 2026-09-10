@@ -21,7 +21,6 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -30,8 +29,6 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
 import java.util.*;
 
 /**
@@ -204,6 +201,9 @@ public class NexCraftTreeScreen extends Screen {
 
         // 進行中のバックグラウンド計算結果を破棄（ユーザーの切替が古い結果で上書きされるのを防ぐ）
         recomputeSeq++;
+        // 切替は同期実行のため進捗バー表示を解除しておく（詰み防止）
+        computing = false;
+        progressNodes = 0;
 
         UnifiedStockSnapshot snapshot = new UnifiedStockSnapshot();
         snapshot.addProvider(new PlayerInventoryStock(mc.player));

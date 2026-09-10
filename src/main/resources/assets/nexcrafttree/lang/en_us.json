@@ -94,14 +94,6 @@
   "msg.nexcrafttree.cooldown": "§c[NexCraftTree] Please wait a moment before crafting again.",
   "msg.nexcrafttree.done": "§a✔ Craft complete! Collect from the result slot",
 
-  "msg.nexcrafttree.seq.missing": "§c[NexCraftTree] Missing materials - bulk craft unavailable. Gather the materials first.",
-  "msg.nexcrafttree.seq.no_steps": "§e[NexCraftTree] Nothing to craft (everything is in stock)",
-  "msg.nexcrafttree.seq.need_container": "§c[NexCraftTree] Open a crafting table or an RS Crafting Grid before pressing [Create]",
-  "msg.nexcrafttree.seq.started": "§a[NexCraftTree] Starting auto craft (%s steps)...",
-  "msg.nexcrafttree.seq.progress": "§e[NexCraftTree] Crafting (%s/%s): %s",
-  "msg.nexcrafttree.seq.done": "§a✔ [NexCraftTree] Bulk craft complete! Created %s!",
-  "msg.nexcrafttree.seq.cancel_prefix": "§c[NexCraftTree] %s",
-  "msg.nexcrafttree.seq.cancel_closed": "Auto craft cancelled: screen was closed",
   "msg.nexcrafttree.seq.cancel_transfer": "Cancelled: ingredients could not be placed into the grid (missing or transfer incomplete)"
 }
 
