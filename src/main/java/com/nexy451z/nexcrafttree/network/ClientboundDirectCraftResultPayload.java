@@ -16,7 +16,7 @@ public record ClientboundDirectCraftResultPayload(
         ItemStack resultStack,
         int count
 ) implements CustomPacketPayload {
-    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("NexCraftTree", "direct_craft_result");
+    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("nexcrafttree", "direct_craft_result");
     public static final Type<ClientboundDirectCraftResultPayload> TYPE = new Type<>(ID);
 
     public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundDirectCraftResultPayload> STREAM_CODEC = StreamCodec.composite(

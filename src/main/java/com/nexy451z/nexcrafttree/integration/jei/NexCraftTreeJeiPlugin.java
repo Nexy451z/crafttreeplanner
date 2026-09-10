@@ -17,7 +17,7 @@ import java.util.Optional;
 
 @JeiPlugin
 public class NexCraftTreeJeiPlugin implements IModPlugin, IGlobalGuiHandler {
-    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("NexCraftTree", "jei_plugin");
+    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("nexcrafttree", "jei_plugin");
 
     @Override
     public ResourceLocation getPluginUid() {

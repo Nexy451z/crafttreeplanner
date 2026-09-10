@@ -16,7 +16,7 @@ public record ServerboundExecuteDirectCraftPayload(
         List<DirectCraftStep> steps,
         ItemStack slottedWorkstation
 ) implements CustomPacketPayload {
-    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("NexCraftTree", "execute_direct_craft");
+    public static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath("nexcrafttree", "execute_direct_craft");
     public static final Type<ServerboundExecuteDirectCraftPayload> TYPE = new Type<>(ID);
 
     public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundExecuteDirectCraftPayload> STREAM_CODEC = StreamCodec.composite(
