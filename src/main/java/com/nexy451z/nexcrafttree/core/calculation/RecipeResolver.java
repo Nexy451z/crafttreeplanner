@@ -67,8 +67,15 @@ public class RecipeResolver {
     private int nodeCount = 0;
     private long deadline = 0;
     private final Map<net.minecraft.world.item.Item, Long> consumed = new HashMap<>();
+    /** ノードパス→選択中レシピID。再探索時にユーザーの加工法選択を引き継ぐ */
+    private Map<String, ResourceLocation> recipePreferences = Collections.emptyMap();
     /** セッション共有のレシピ候補キャッシュ（未ソート・レシピ再読込時にinvalidateCachesで破棄） */
     private static final Map<net.minecraft.world.item.Item, CacheEntry> candidateCache = new ConcurrentHashMap<>();
+
+    /** ノードパスキーの1セグメント（例: minecraft:iron_ingot@2）。ツリー内の位置を安定して指す */
+    public static String pathSegment(ItemStack stack, int siblingIndex) {
+        return VirtualStockTracker.keyOf(stack) + "@" + siblingIndex;
+    }
 
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level) {
         return resolve(target, wantCount, stock, level, null);
@@ -80,13 +87,21 @@ public class RecipeResolver {
 
     public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level,
                                     @Nullable ItemStack activeWorkstation, @Nullable ProgressListener progress) {
+        return resolve(target, wantCount, stock, level, activeWorkstation, progress, Collections.emptyMap());
+    }
+
+    public CraftingTreeNode resolve(ItemStack target, long wantCount, UnifiedStockSnapshot stock, Level level,
+                                    @Nullable ItemStack activeWorkstation, @Nullable ProgressListener progress,
+                                    Map<String, ResourceLocation> preferences) {
         progressListener = progress;
+        recipePreferences = (preferences == null) ? Collections.emptyMap() : preferences;
         nodeCount = 0;
         consumed.clear();
         deadline = System.currentTimeMillis() + timeoutMs(); // 上限時間で安全に打ち切り
         VirtualStockTracker tracker = new VirtualStockTracker();
         Deque<ResourceLocation> path = new ArrayDeque<>();
-        CraftingTreeNode result = resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation);
+        String rootPathKey = pathSegment(target, 0);
+        CraftingTreeNode result = resolveRecursive(target, Math.max(1, wantCount), stock, tracker, level, path, 0, activeWorkstation, rootPathKey);
         if (progressListener != null) {
             progressListener.onProgress(nodeCount, true);
         }
@@ -96,7 +111,7 @@ public class RecipeResolver {
     private CraftingTreeNode resolveRecursive(ItemStack target, long want, UnifiedStockSnapshot stock,
                                               VirtualStockTracker tracker, Level level,
                                               Deque<ResourceLocation> path, int depth,
-                                              @Nullable ItemStack activeWorkstation) {
+                                              @Nullable ItemStack activeWorkstation, String nodePathKey) {
         CraftingTreeNode node = new CraftingTreeNode(target, want);
         try {
             if (target == null || target.isEmpty() || want <= 0) {
@@ -180,9 +195,21 @@ public class RecipeResolver {
 
             node.alternativeRecipes.clear();
             node.alternativeRecipes.addAll(candidates);
-            node.selectedRecipeIndex = 0;
 
+            // ユーザーが以前このパスで選んでいた加工法があれば引き継ぐ
             PlannedRecipe chosen = candidates.get(0);
+            int chosenIdx = 0;
+            ResourceLocation preferred = recipePreferences.get(nodePathKey);
+            if (preferred != null) {
+                for (int ci = 0; ci < candidates.size(); ci++) {
+                    if (preferred.equals(candidates.get(ci).getId())) {
+                        chosen = candidates.get(ci);
+                        chosenIdx = ci;
+                        break;
+                    }
+                }
+            }
+            node.selectedRecipeIndex = chosenIdx;
             node.recipe = chosen.getRecipeHolder();
             node.station = chosen.getStation();
 
@@ -198,9 +225,11 @@ public class RecipeResolver {
                     node.missingAmount = deficit;
                     return node;
                 }
-                for (GroupedIngredient gi : grouped) {
-                    long need = crafts * gi.count;
-                    CraftingTreeNode child = resolveRecursive(gi.stack, need, stock, tracker, level, path, depth + 1, activeWorkstation);
+                for (int gi = 0; gi < grouped.size(); gi++) {
+                    GroupedIngredient ingredient = grouped.get(gi);
+                    long need = crafts * ingredient.count;
+                    String childPathKey = nodePathKey + "/" + pathSegment(ingredient.stack, gi);
+                    CraftingTreeNode child = resolveRecursive(ingredient.stack, need, stock, tracker, level, path, depth + 1, activeWorkstation, childPathKey);
                     node.children.add(child);
                 }
             } finally {
@@ -240,11 +269,14 @@ public class RecipeResolver {
         Deque<ResourceLocation> path = new ArrayDeque<>();
         ResourceLocation key = VirtualStockTracker.keyOf(node.item);
         path.addLast(key);
+        String switchPathKey = pathSegment(node.item, 0);
         try {
             List<GroupedIngredient> grouped = groupIngredients(chosen.getIngredients(), stock);
-            for (GroupedIngredient gi : grouped) {
-                long need = crafts * gi.count;
-                CraftingTreeNode child = resolveRecursive(gi.stack, need, stock, tracker, level, path, 1, activeWorkstation);
+            for (int gi = 0; gi < grouped.size(); gi++) {
+                GroupedIngredient ingredient = grouped.get(gi);
+                long need = crafts * ingredient.count;
+                String childPathKey = switchPathKey + "/" + pathSegment(ingredient.stack, gi);
+                CraftingTreeNode child = resolveRecursive(ingredient.stack, need, stock, tracker, level, path, 1, activeWorkstation, childPathKey);
                 node.children.add(child);
             }
         } finally {

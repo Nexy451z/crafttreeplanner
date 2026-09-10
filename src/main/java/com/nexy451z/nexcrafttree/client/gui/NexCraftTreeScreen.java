@@ -451,6 +451,8 @@ public class NexCraftTreeScreen extends Screen {
         final long qty = quantity;
         final ItemStack target = targetItem.copy();
         final ItemStack ws = slottedWorkstation.copy();
+        // 現在のツリーでユーザーが選んでいる加工法をパス単位で引き継ぐ
+        final Map<String, net.minecraft.resources.ResourceLocation> preferences = captureRecipePreferences();
 
         computing = true;
         computeStartMs = System.currentTimeMillis();
@@ -463,7 +465,7 @@ public class NexCraftTreeScreen extends Screen {
                         new com.nexy451z.nexcrafttree.core.calculation.RecipeResolver();
                 CraftingTreeNode newRoot = resolver.resolve(target, qty, snapshot, level, ws, (nodes, finished) -> {
                     if (seq == recomputeSeq) progressNodes = nodes;
-                });
+                }, preferences);
                 Minecraft.getInstance().execute(() -> {
                     if (seq != recomputeSeq || Minecraft.getInstance().screen != this) return;
                     this.root = newRoot;
@@ -478,6 +480,34 @@ public class NexCraftTreeScreen extends Screen {
                 });
             }
         });
+    }
+
+    /** 現在のツリーの「ノードパス→選択レシピID」を収集する（再計算時の選択引継ぎ用） */
+    private Map<String, net.minecraft.resources.ResourceLocation> captureRecipePreferences() {
+        Map<String, net.minecraft.resources.ResourceLocation> out = new HashMap<>();
+        try {
+            CraftingTreeNode currentRoot = this.root;
+            if (currentRoot != null) {
+                String rootKey = RecipeResolver.pathSegment(currentRoot.item, 0);
+                captureRecipePreferencesRecursive(currentRoot, rootKey, out);
+            }
+        } catch (Throwable ignored) {
+        }
+        return out.isEmpty() ? java.util.Collections.emptyMap() : Map.copyOf(out);
+    }
+
+    private void captureRecipePreferencesRecursive(CraftingTreeNode node, String pathKey,
+                                                   Map<String, net.minecraft.resources.ResourceLocation> out) {
+        if (node == null) return;
+        if (!node.alternativeRecipes.isEmpty()
+                && node.selectedRecipeIndex >= 0 && node.selectedRecipeIndex < node.alternativeRecipes.size()) {
+            out.put(pathKey, node.alternativeRecipes.get(node.selectedRecipeIndex).getId());
+        }
+        for (int i = 0; i < node.children.size(); i++) {
+            CraftingTreeNode child = node.children.get(i);
+            String childKey = pathKey + "/" + RecipeResolver.pathSegment(child.item, i);
+            captureRecipePreferencesRecursive(child, childKey, out);
+        }
     }
 
     private void cycleWorkstationFromPlayer() {
