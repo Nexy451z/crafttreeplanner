@@ -626,6 +626,9 @@ public class RecipeResolver {
         if (target == null || target.isEmpty()) return new CandidateFind(Collections.emptyList(), true);
         List<PlannedRecipe> list = new ArrayList<>();
         Set<Identifier> seenRecipeIds = new HashSet<>();
+        // JEIがRecipeHolderを返さない独自カテゴリ（例: reliquary:alkahestry_crafting）のレシピ実体。
+        // バニラ側インデックスに同じ実体が載っていても二重計上・設備誤判定しないよう抑制する
+        Set<Integer> seenJeiRecipeObjects = new HashSet<>();
         boolean[] complete = {true};
 
         // 1. JEI からの全加工カテゴリ探索
@@ -650,9 +653,12 @@ public class RecipeResolver {
                         break;
                     }
                     IRecipeType<?> recipeType = cat.getRecipeType();
-                    String catId = recipeType.getUid().toString();
-                    String catPath = recipeType.getUid().getPath().toLowerCase(Locale.ROOT);
-                    boolean isCraftingTable = catPath.contains("crafting");
+                    Identifier catUid = recipeType.getUid();
+                    String catId = catUid.toString();
+                    String catPath = catUid.getPath().toLowerCase(Locale.ROOT);
+                    // 「crafting」を含むだけのカスタムカテゴリ(例: reliquary:alkahestry_crafting)を
+                    // 作業台と誤認しないよう、バニラ作業台カテゴリ(minecraft:crafting)のみ作業台扱いする
+                    boolean isCraftingTable = "minecraft".equals(catUid.getNamespace()) && "crafting".equals(catPath);
 
                     // 触媒（作業台・加工機）の取得
                     List<ItemStack> catalysts = Collections.emptyList();
@@ -665,7 +671,9 @@ public class RecipeResolver {
                     }
 
                     ItemStack stationIcon;
-                    if (!catalysts.isEmpty()) {
+                    if (isCraftingTable) {
+                        stationIcon = new ItemStack(Items.CRAFTING_TABLE);
+                    } else if (!catalysts.isEmpty()) {
                         stationIcon = catalysts.get(0);
                         if (activeWorkstation != null && !activeWorkstation.isEmpty()) {
                             for (ItemStack c : catalysts) {
@@ -675,8 +683,6 @@ public class RecipeResolver {
                                 }
                             }
                         }
-                    } else if (isCraftingTable) {
-                        stationIcon = new ItemStack(Items.CRAFTING_TABLE);
                     } else if (catPath.contains("smelt") || catPath.contains("furnace")) {
                         stationIcon = new ItemStack(Items.FURNACE);
                     } else if (catPath.contains("blast")) {
@@ -691,7 +697,10 @@ public class RecipeResolver {
                         stationIcon = new ItemStack(Items.CRAFTING_TABLE);
                     }
 
-                    ProcessingStation station = new ProcessingStation(stationIcon, cat.getTitle(), catId, isCraftingTable);
+                    // バニラ作業台は標準ステーションに統一（表示名「作業台」・uid minecraft:crafting）
+                    ProcessingStation station = isCraftingTable
+                            ? ProcessingStation.CRAFTING_TABLE
+                            : new ProcessingStation(stationIcon, cat.getTitle(), catId, false);
 
                     List<?> recipes = Collections.emptyList();
                     try {
@@ -768,8 +777,21 @@ public class RecipeResolver {
                                     recipeType.getUid().getPath() + "/" + list.size());
                         }
                         seenRecipeIds.add(recipeId);
+                        if (holder == null) {
+                            seenJeiRecipeObjects.add(System.identityHashCode(r));
+                        }
 
-                        list.add(new PlannedRecipe(recipeId, holder, station, ingredients, outStack, outCount, cat.getTitle()));
+                        // レシピ実体が crafting 型なら設備は作業台（独自JEIカテゴリでも作業台レシピ検索に載るため）
+                        ProcessingStation recipeStation = station;
+                        try {
+                            if (r instanceof net.minecraft.world.item.crafting.Recipe<?> rr
+                                    && net.minecraft.world.item.crafting.RecipeType.CRAFTING.equals(rr.getType())) {
+                                recipeStation = ProcessingStation.CRAFTING_TABLE;
+                            }
+                        } catch (Throwable ignored) {
+                        }
+
+                        list.add(new PlannedRecipe(recipeId, holder, recipeStation, ingredients, outStack, outCount, cat.getTitle()));
                     }
                 }
             }
@@ -786,6 +808,8 @@ public class RecipeResolver {
                 for (RecipeHolder<?> h : matched) {
                     if (h == null || h.value() == null) continue;
                     if (seenRecipeIds.contains(h.id())) continue;
+                    // JEI独自カテゴリで既に実体を拾っているレシピはスキップ（設備の誤判定・重複を防ぐ）
+                    if (seenJeiRecipeObjects.contains(System.identityHashCode(h.value()))) continue;
 
                     ItemStack out;
                     try {
@@ -866,20 +890,42 @@ public class RecipeResolver {
     }
 
     private static ProcessingStation determineStationForVanilla(RecipeHolder<?> h) {
-        if (h.value() instanceof net.minecraft.world.item.crafting.CraftingRecipe) {
+        net.minecraft.world.item.crafting.Recipe<?> r = h.value();
+        // レシピ「型」で判定する。crafting型なら（独自シリアライザでも）作業台のレシピ検索に載る＝
+        // 作業台でクラフト可能なため、作業台として扱う（例: Reliquaryの錬金術レシピ）
+        if (net.minecraft.world.item.crafting.RecipeType.CRAFTING.equals(r.getType())) {
             return ProcessingStation.CRAFTING_TABLE;
-        } else if (h.value() instanceof net.minecraft.world.item.crafting.SmeltingRecipe) {
+        }
+        if (net.minecraft.world.item.crafting.RecipeType.SMELTING.equals(r.getType())) {
             return ProcessingStation.FURNACE;
-        } else if (h.value() instanceof net.minecraft.world.item.crafting.BlastingRecipe) {
+        } else if (net.minecraft.world.item.crafting.RecipeType.BLASTING.equals(r.getType())) {
             return new ProcessingStation(new ItemStack(Items.BLAST_FURNACE), Component.translatable("block.minecraft.blast_furnace"), "minecraft:blasting", false);
-        } else if (h.value() instanceof net.minecraft.world.item.crafting.SmokingRecipe) {
+        } else if (net.minecraft.world.item.crafting.RecipeType.SMOKING.equals(r.getType())) {
             return new ProcessingStation(new ItemStack(Items.SMOKER), Component.translatable("block.minecraft.smoker"), "minecraft:smoking", false);
-        } else if (h.value() instanceof net.minecraft.world.item.crafting.StonecutterRecipe) {
+        } else if (net.minecraft.world.item.crafting.RecipeType.STONECUTTING.equals(r.getType())) {
             return new ProcessingStation(new ItemStack(Items.STONECUTTER), Component.translatable("block.minecraft.stonecutter"), "minecraft:stonecutting", false);
-        } else if (h.value() instanceof net.minecraft.world.item.crafting.SmithingRecipe) {
+        } else if (net.minecraft.world.item.crafting.RecipeType.SMITHING.equals(r.getType())) {
             return new ProcessingStation(new ItemStack(Items.SMITHING_TABLE), Component.translatable("block.minecraft.smithing_table"), "minecraft:smithing", false);
         }
-        return ProcessingStation.CRAFTING_TABLE;
+        // MOD独自レシピ: 作業台扱いにはしない（レシピ型IDを表示して区別できるようにする）
+        return unknownStation(r);
+    }
+
+    /** 設備不明（MOD独自型・カスタムシリアライザ）の汎用ステーション。表示名はレシピ型ID */
+    private static ProcessingStation unknownStation(net.minecraft.world.item.crafting.Recipe<?> recipe) {
+        String typeId = "unknown";
+        try {
+            Identifier id = BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType());
+            if (id != null) {
+                typeId = id.toString();
+            }
+        } catch (Throwable ignored) {
+        }
+        return new ProcessingStation(
+                new ItemStack(Items.CRAFTING_TABLE),
+                Component.literal(typeId),
+                "nexcrafttree:unknown:" + typeId,
+                false);
     }
 
     private static void sortCandidates(

@@ -733,7 +733,10 @@ public class DirectCraftingEngine {
      */
     private static boolean stationMatchesRecipe(Recipe<?> recipe, ItemStack stationIcon) {
         if (stationIcon == null || stationIcon.isEmpty()) return false;
-        if (recipe instanceof CraftingRecipe) return stationIcon.is(Items.CRAFTING_TABLE);
+        // crafting型レシピは（独自シリアライザでも）作業台のレシピ検索に載るため作業台を要求する
+        if (net.minecraft.world.item.crafting.RecipeType.CRAFTING.equals(recipe.getType())) {
+            return stationIcon.is(Items.CRAFTING_TABLE);
+        }
         if (recipe instanceof SmeltingRecipe) return stationIcon.is(Items.FURNACE);
         if (recipe instanceof BlastingRecipe) return stationIcon.is(Items.BLAST_FURNACE);
         if (recipe instanceof SmokingRecipe) return stationIcon.is(Items.SMOKER);
