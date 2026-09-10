@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "E",
 
   "gui.nexcrafttree.status.searching": "Suche läuft",
+  "gui.nexcrafttree.status.too_many_steps": "✘ Baum zu groß für einen Durchgang (%s Schritte) - Anzahl verringern oder Rezept wechseln",
   "gui.nexcrafttree.status.ready": "✔ Alle Materialien vorhanden - Sofort-Craft möglich",
   "gui.nexcrafttree.status.missing_summary": "✘ Fehlt: %s Arten (%s) | Schritte: %s",
   "gui.nexcrafttree.status.crafting": "Herstellung läuft...",

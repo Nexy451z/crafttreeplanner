@@ -1299,6 +1299,21 @@ public class NexCraftTreeScreen extends Screen {
             this.statusFeedbackColor = 0xFFF9E2AF;
             return;
         }
+        // 送信前検査: エンコード上限を超えるとパケットエンコード失敗で切断されるため、ここで拒否する
+        boolean tooLarge = steps.size() > 512;
+        if (!tooLarge) {
+            for (DirectCraftStep step : steps) {
+                if (step.inputs() != null && step.inputs().size() > DirectCraftStep.MAX_INPUTS) {
+                    tooLarge = true;
+                    break;
+                }
+            }
+        }
+        if (tooLarge) {
+            this.statusFeedback = tr("gui.nexcrafttree.status.too_many_steps", steps.size());
+            this.statusFeedbackColor = 0xFFF38BA8;
+            return;
+        }
         this.statusFeedback = tr("gui.nexcrafttree.status.crafting");
         this.statusFeedbackColor = 0xFFF9E2AF;
         NexCraftTreeNetwork.sendDirectCraftRequest(node.item, (int) node.requiredAmount, steps, slottedWorkstation);

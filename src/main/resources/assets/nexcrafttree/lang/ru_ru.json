@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "Р",
 
   "gui.nexcrafttree.status.searching": "Поиск",
+  "gui.nexcrafttree.status.too_many_steps": "✘ Дерево слишком большое для крафта сразу (%s шагов) — уменьшите количество или смените рецепт",
   "gui.nexcrafttree.status.ready": "✔ Все материалы в наличии — доступен крафт в один клик",
   "gui.nexcrafttree.status.missing_summary": "✘ Не хватает: %s видов (%s) | Шагов: %s",
   "gui.nexcrafttree.status.crafting": "Крафт...",

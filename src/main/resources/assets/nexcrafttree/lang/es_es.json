@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "R",
 
   "gui.nexcrafttree.status.searching": "Buscando",
+  "gui.nexcrafttree.status.too_many_steps": "✘ Árbol demasiado grande para craftear de una vez (%s pasos) - reduce la cantidad o cambia de receta",
   "gui.nexcrafttree.status.ready": "✔ Todos los materiales listos - crafteo de un clic disponible",
   "gui.nexcrafttree.status.missing_summary": "✘ Faltantes: %s tipos (%s) | Pasos: %s",
   "gui.nexcrafttree.status.crafting": "Crafteando...",

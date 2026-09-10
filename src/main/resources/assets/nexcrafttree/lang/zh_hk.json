@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "出",
 
   "gui.nexcrafttree.status.searching": "搜尋中",
+  "gui.nexcrafttree.status.too_many_steps": "✘ 生產樹過大，無法一次生產 (%s 步) - 請減少數量或切換配方",
   "gui.nexcrafttree.status.ready": "✔ 材料齊全 - 可一鍵生產",
   "gui.nexcrafttree.status.missing_summary": "✘ 缺少: %s 種 (%s個) | 步驟: %s次",
   "gui.nexcrafttree.status.crafting": "生產中...",

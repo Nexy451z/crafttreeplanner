@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "R",
 
   "gui.nexcrafttree.status.searching": "Ricerca",
+  "gui.nexcrafttree.status.too_many_steps": "✘ Albero troppo grande per un craft unico (%s passaggi) - riduci la quantità o cambia ricetta",
   "gui.nexcrafttree.status.ready": "✔ Tutti i materiali pronti - craft con un clic disponibile",
   "gui.nexcrafttree.status.missing_summary": "✘ Mancanti: %s tipi (%s) | Passaggi: %s",
   "gui.nexcrafttree.status.crafting": "Crafting in corso...",

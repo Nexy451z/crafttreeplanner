@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "결",
 
   "gui.nexcrafttree.status.searching": "검색 중",
+  "gui.nexcrafttree.status.too_many_steps": "✘ 트리가 너무 커서 한 번에 제작할 수 없습니다 (%s단계) - 수량을 줄이거나 레시피를 변경하세요",
   "gui.nexcrafttree.status.ready": "✔ 재료가 모두 준비됨 - 원클릭 제작 가능",
   "gui.nexcrafttree.status.missing_summary": "✘ 부족: %s종류 (%s개) | 단계: %s회",
   "gui.nexcrafttree.status.crafting": "제작 중...",

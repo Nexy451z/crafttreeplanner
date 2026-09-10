@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "R",
 
   "gui.nexcrafttree.status.searching": "Recherche",
+  "gui.nexcrafttree.status.too_many_steps": "✘ Arbre trop grand pour une fabrication en un clic (%s étapes) - réduisez la quantité ou changez de recette",
   "gui.nexcrafttree.status.ready": "✔ Tous les matériaux prêts - fabrication en un clic possible",
   "gui.nexcrafttree.status.missing_summary": "✘ Manque : %s types (%s) | Étapes : %s",
   "gui.nexcrafttree.status.crafting": "Fabrication en cours...",

@@ -20,9 +20,9 @@ public record ServerboundExecuteDirectCraftPayload(
     public static final Type<ServerboundExecuteDirectCraftPayload> TYPE = new Type<>(ID);
 
     public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundExecuteDirectCraftPayload> STREAM_CODEC = StreamCodec.composite(
-            ItemStack.STREAM_CODEC, ServerboundExecuteDirectCraftPayload::targetItem,
+            ItemStack.OPTIONAL_STREAM_CODEC, ServerboundExecuteDirectCraftPayload::targetItem,
             ByteBufCodecs.VAR_INT, ServerboundExecuteDirectCraftPayload::quantity,
-            DirectCraftStep.STREAM_CODEC.apply(ByteBufCodecs.list(256)), ServerboundExecuteDirectCraftPayload::steps,
+            DirectCraftStep.STREAM_CODEC.apply(ByteBufCodecs.list(512)), ServerboundExecuteDirectCraftPayload::steps,
             ItemStack.OPTIONAL_STREAM_CODEC, ServerboundExecuteDirectCraftPayload::slottedWorkstation,
             ServerboundExecuteDirectCraftPayload::new
     );

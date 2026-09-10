@@ -122,9 +122,15 @@ public class DirectCraftingEngine {
         // 既存の未回収品があれば先にインベントリに格納
         flushPendingOutputToInventory(player);
 
-        if (steps == null || steps.isEmpty() || steps.size() > 256) {
+        if (steps == null || steps.isEmpty() || steps.size() > 512) {
             reject(player, Component.translatable("msg.nexcrafttree.no_steps"));
             return;
+        }
+        for (DirectCraftStep step : steps) {
+            if (step.inputs() != null && step.inputs().size() > DirectCraftStep.MAX_INPUTS) {
+                reject(player, Component.translatable("msg.nexcrafttree.no_steps"));
+                return;
+            }
         }
         int totalExecutions = 0;
         for (DirectCraftStep step : steps) {

@@ -18,12 +18,15 @@ import java.util.List;
  */
 public record DirectCraftStep(ResourceLocation recipeId, int count, ItemStack stationIcon,
                               ItemStack expectedOutput, List<ItemStack> inputs) {
+    /** 1工程あたりの材料リスト上限（コーデックとクライアント検査で共用） */
+    public static final int MAX_INPUTS = 16;
+
     public static final StreamCodec<RegistryFriendlyByteBuf, DirectCraftStep> STREAM_CODEC = StreamCodec.composite(
             ResourceLocation.STREAM_CODEC, DirectCraftStep::recipeId,
             ByteBufCodecs.VAR_INT, DirectCraftStep::count,
             ItemStack.OPTIONAL_STREAM_CODEC, DirectCraftStep::stationIcon,
             ItemStack.OPTIONAL_STREAM_CODEC, DirectCraftStep::expectedOutput,
-            ItemStack.OPTIONAL_STREAM_CODEC.apply(ByteBufCodecs.list(16)), DirectCraftStep::inputs,
+            ItemStack.OPTIONAL_STREAM_CODEC.apply(ByteBufCodecs.list(MAX_INPUTS)), DirectCraftStep::inputs,
             DirectCraftStep::new
     );
 }

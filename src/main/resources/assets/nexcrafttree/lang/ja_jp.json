@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "出",
 
   "gui.nexcrafttree.status.searching": "探索中",
+  "gui.nexcrafttree.status.too_many_steps": "✘ ツリーが大きすぎて一括作成できません (%s工程) - 数量を減らすか加工法を変更してください",
   "gui.nexcrafttree.status.ready": "✔ 素材完備 - ワンクリック作成可能",
   "gui.nexcrafttree.status.missing_summary": "✘ 不足: %s種類 (%s個) | 工程: %s回",
   "gui.nexcrafttree.status.crafting": "クラフト実行中...",

@@ -38,6 +38,7 @@
   "gui.nexcrafttree.slot.output_ph": "出",
 
   "gui.nexcrafttree.status.searching": "搜索中",
+  "gui.nexcrafttree.status.too_many_steps": "✘ 合成树过大，无法一次合成 (%s 步) - 请减少数量或切换配方",
   "gui.nexcrafttree.status.ready": "✔ 材料齐全 - 可一键合成",
   "gui.nexcrafttree.status.missing_summary": "✘ 缺少: %s 种 (%s个) | 步骤: %s次",
   "gui.nexcrafttree.status.crafting": "合成中...",
