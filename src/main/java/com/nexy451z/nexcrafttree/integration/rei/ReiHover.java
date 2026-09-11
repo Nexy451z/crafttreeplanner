@@ -1,6 +1,7 @@
 package com.nexy451z.nexcrafttree.integration.rei;
 
 import com.nexy451z.nexcrafttree.integration.ModIntegration;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.world.item.ItemStack;
 
@@ -10,6 +11,8 @@ import java.util.Optional;
 /**
  * REIのホバー取得（リフレクションのみ）。
  * 正規経路: ScreenRegistry#getInstance().getFocusedStack(screen, mousePoint)
+ * 26.1のCloth Configには me.shedaniel.math.PointHelper が無いため、
+ * me.shedaniel.math.Point(double,double) を現在のマウス座標から直接生成する。
  */
 public final class ReiHover {
     private ReiHover() {
@@ -25,10 +28,8 @@ public final class ReiHover {
             Object registry = getInstance.invoke(null);
             if (registry == null) return Optional.empty();
 
-            // PointHelper.ofMouse()
-            Class<?> pointHelper = Class.forName("me.shedaniel.math.PointHelper");
-            Method ofMouse = pointHelper.getMethod("ofMouse");
-            Object point = ofMouse.invoke(null);
+            Object point = createMousePoint();
+            if (point == null) return Optional.empty();
 
             Method getFocused = null;
             for (Method m : registry.getClass().getMethods()) {
@@ -43,6 +44,22 @@ public final class ReiHover {
             return entryToItemStack(entryStack);
         } catch (Throwable ignored) {
             return Optional.empty();
+        }
+    }
+
+    /** 現在のマウス位置をGUIスケール座標の me.shedaniel.math.Point として生成する */
+    private static Object createMousePoint() {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc == null || mc.getWindow() == null || mc.mouseHandler == null) return null;
+            int screenW = Math.max(1, mc.getWindow().getScreenWidth());
+            int screenH = Math.max(1, mc.getWindow().getScreenHeight());
+            double guiX = mc.mouseHandler.xpos() * (double) mc.getWindow().getGuiScaledWidth() / (double) screenW;
+            double guiY = mc.mouseHandler.ypos() * (double) mc.getWindow().getGuiScaledHeight() / (double) screenH;
+            Class<?> pointCls = Class.forName("me.shedaniel.math.Point");
+            return pointCls.getConstructor(double.class, double.class).newInstance(guiX, guiY);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
